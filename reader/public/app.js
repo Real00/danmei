@@ -43,6 +43,8 @@ const els = {
   fontPlus: document.getElementById("fontPlus"),
   weightMinus: document.getElementById("weightMinus"),
   weightPlus: document.getElementById("weightPlus"),
+  brightnessMinus: document.getElementById("brightnessMinus"),
+  brightnessPlus: document.getElementById("brightnessPlus"),
   reflow: document.getElementById("reflow"),
   sheetScrim: document.getElementById("sheetScrim"),
   fontSheet: document.getElementById("fontSheet"),
@@ -50,6 +52,8 @@ const els = {
   fontPlusSheet: document.getElementById("fontPlusSheet"),
   weightMinusSheet: document.getElementById("weightMinusSheet"),
   weightPlusSheet: document.getElementById("weightPlusSheet"),
+  brightnessMinusSheet: document.getElementById("brightnessMinusSheet"),
+  brightnessPlusSheet: document.getElementById("brightnessPlusSheet"),
   reflowSheet: document.getElementById("reflowSheet"),
   closeFontSheet: document.getElementById("closeFontSheet"),
 };
@@ -65,9 +69,13 @@ syncTopbarHeight();
 
 const DEFAULT_FONT_PX = 18;
 const DEFAULT_FONT_WEIGHT = 500;
+const DEFAULT_BRIGHTNESS = 1;
 const MIN_FONT_WEIGHT = 300;
 const MAX_FONT_WEIGHT = 900;
 const FONT_WEIGHT_STEP = 100;
+const MIN_BRIGHTNESS = 0.55;
+const MAX_BRIGHTNESS = 1.25;
+const BRIGHTNESS_STEP = 0.05;
 const WEIGHT_PROBE_MIN_DELTA = 0.25;
 const READER_FONT_STACK_DEFAULT =
   `"Microsoft YaHei Variable", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", ` +
@@ -182,6 +190,12 @@ function getStoredFontWeight(bookKey) {
   return Number.isFinite(n) ? n : null;
 }
 
+function getStoredBrightness(bookKey) {
+  const bookState = readBookScopedState(bookKey);
+  const n = Number(bookState?.brightness);
+  return Number.isFinite(n) ? n : null;
+}
+
 function getStoredProgress(bookKey) {
   const bookState = readBookScopedState(bookKey);
   if (!isPlainObject(bookState?.progress)) return null;
@@ -248,6 +262,7 @@ const state = {
   pageIdx: 0,
   fontPx: DEFAULT_FONT_PX,
   fontWeight: DEFAULT_FONT_WEIGHT,
+  brightness: DEFAULT_BRIGHTNESS,
   lastUrl: localStorage.getItem("danmei_lastUrl") || "",
   isLoading: false,
   loadingKind: "",
@@ -436,6 +451,16 @@ function setFontWeight(weight) {
   }
 }
 
+function setBrightness(value) {
+  const target = Number.isFinite(Number(value)) ? Number(value) : DEFAULT_BRIGHTNESS;
+  const clamped = Math.max(MIN_BRIGHTNESS, Math.min(MAX_BRIGHTNESS, Math.round(target * 100) / 100));
+  state.brightness = clamped;
+  document.documentElement.style.setProperty("--page-brightness", clamped.toFixed(2));
+  if (state.currentBookKey) {
+    patchBookScopedState(state.currentBookKey, { brightness: clamped });
+  }
+}
+
 function applyScopedFontForCurrentBook() {
   if (!state.currentBookKey) return;
   const savedFontPx = getStoredFontPx(state.currentBookKey);
@@ -455,6 +480,17 @@ function applyScopedFontForCurrentBook() {
   if (state.fontWeight !== weight) {
     state.fontWeight = weight;
     document.documentElement.style.setProperty("--page-weight", String(weight));
+  }
+
+  const savedBrightness = getStoredBrightness(state.currentBookKey);
+  const nextBrightness = savedBrightness == null ? DEFAULT_BRIGHTNESS : savedBrightness;
+  const brightness = Math.max(
+    MIN_BRIGHTNESS,
+    Math.min(MAX_BRIGHTNESS, Math.round(Number(nextBrightness) * 100) / 100)
+  );
+  if (state.brightness !== brightness) {
+    state.brightness = brightness;
+    document.documentElement.style.setProperty("--page-brightness", brightness.toFixed(2));
   }
 }
 
@@ -484,6 +520,7 @@ function saveProgressForCurrentBook() {
 
 setFontPx(state.fontPx);
 setFontWeight(state.fontWeight);
+setBrightness(state.brightness);
 ensureReadableWeightFont();
 
 function showDrawer(open) {
@@ -1068,6 +1105,11 @@ function adjustFontWeight(delta) {
   void forceReflowCurrentChapter({ preserveProgress: true, waitForLayout: true, showHint: false });
 }
 
+function adjustBrightness(delta) {
+  setBrightness(state.brightness + delta * BRIGHTNESS_STEP);
+  showHint(`亮度 ${Math.round(state.brightness * 100)}%`, { autoResetMs: 1200 });
+}
+
 function reflowCurrentChapter() {
   if (!state.chapter) return;
   void forceReflowCurrentChapter({ preserveProgress: true, waitForLayout: true, showHint: true });
@@ -1181,11 +1223,15 @@ els.fontMinus.addEventListener("click", () => adjustFont(-1));
 els.fontPlus.addEventListener("click", () => adjustFont(1));
 els.weightMinus.addEventListener("click", () => adjustFontWeight(-1));
 els.weightPlus.addEventListener("click", () => adjustFontWeight(1));
+els.brightnessMinus.addEventListener("click", () => adjustBrightness(-1));
+els.brightnessPlus.addEventListener("click", () => adjustBrightness(1));
 els.reflow.addEventListener("click", reflowCurrentChapter);
 els.fontMinusSheet.addEventListener("click", () => adjustFont(-1));
 els.fontPlusSheet.addEventListener("click", () => adjustFont(1));
 els.weightMinusSheet.addEventListener("click", () => adjustFontWeight(-1));
 els.weightPlusSheet.addEventListener("click", () => adjustFontWeight(1));
+els.brightnessMinusSheet.addEventListener("click", () => adjustBrightness(-1));
+els.brightnessPlusSheet.addEventListener("click", () => adjustBrightness(1));
 els.reflowSheet.addEventListener("click", reflowCurrentChapter);
 
 els.toggleIntro.addEventListener("click", () => {

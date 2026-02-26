@@ -17,6 +17,7 @@
   --top: 74px;
   --page-font: 18px;
   --page-weight: 500;
+  --page-brightness: 1;
   --page-lh: 1.85;
   --reader-font-family: "Microsoft YaHei Variable", "Microsoft YaHei",
     "PingFang SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei",
@@ -402,6 +403,8 @@ body {
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
   overflow: hidden;
+  filter: brightness(var(--page-brightness));
+  transition: filter 120ms ease;
 }
 
 .pageHeader {
@@ -590,7 +593,7 @@ body {
 
 .sheetActions {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
