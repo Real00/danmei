@@ -29,7 +29,6 @@ RUN corepack enable \
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
-COPY reader/server.js ./server.js
 
 # Drop root privileges in runtime container.
 RUN chown -R node:node /app
@@ -37,4 +36,4 @@ USER node
 
 EXPOSE 8787
 
-CMD ["node", "server.js"]
+CMD ["node", "dist/server.js"]
