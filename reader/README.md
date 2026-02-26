@@ -12,6 +12,13 @@ pnpm dev
 
 Open `http://localhost:8787`.
 
+Build for production:
+
+```powershell
+pnpm build
+pnpm start
+```
+
 ## Usage
 
 - If there is no `#u` hash URL and no local `danmei_lastUrl`, the app stays idle and prompts for a URL (no sample auto-open).

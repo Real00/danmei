@@ -1,3 +1,4 @@
 node_modules/
 reader/node_modules/
+reader/dist/
 _tmp_*
