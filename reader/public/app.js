@@ -11,6 +11,8 @@ const els = {
   toggleChapters: document.getElementById("toggleChapters"),
   closeDrawer: document.getElementById("closeDrawer"),
   openChapters: document.getElementById("openChapters"),
+  exportTxtTop: document.getElementById("exportTxtTop"),
+  exportTxt: document.getElementById("exportTxt"),
   chapterSearch: document.getElementById("chapterSearch"),
   chapterList: document.getElementById("chapterList"),
   drawerTitle: document.getElementById("drawerTitle"),
@@ -66,6 +68,14 @@ const DEFAULT_FONT_WEIGHT = 500;
 const MIN_FONT_WEIGHT = 300;
 const MAX_FONT_WEIGHT = 900;
 const FONT_WEIGHT_STEP = 100;
+const WEIGHT_PROBE_MIN_DELTA = 0.25;
+const READER_FONT_STACK_DEFAULT =
+  `"Microsoft YaHei Variable", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", ` +
+  `"Source Han Sans SC", "WenQuanYi Micro Hei", "Noto Serif SC", "Source Han Serif SC", ` +
+  `"STSong", "Songti SC", "Noto Serif", serif`;
+const READER_FONT_STACK_FALLBACK =
+  `"PingFang SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", ` +
+  `"WenQuanYi Micro Hei", sans-serif`;
 const READER_STATE_KEY = "danmei_reader_state_v1";
 const READER_STATE_VERSION = 1;
 
@@ -94,6 +104,26 @@ function normalizeUrl(url) {
   } catch {
     return u;
   }
+}
+
+function normalizeChapterPathKey(url) {
+  const u = String(url || "").trim();
+  if (!u) return "";
+  try {
+    const parsed = new URL(u, window.location.origin);
+    let pathname = parsed.pathname || "/";
+    if (pathname.length > 1) pathname = pathname.replace(/\/+$/, "");
+    return `${pathname}${parsed.search}`;
+  } catch {
+    return u.replace(/#.*$/, "");
+  }
+}
+
+function normalizeChapterIndex(idx) {
+  const n = Number(idx);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.floor(n);
+  return i >= 1 ? i : null;
 }
 
 function resolveBookKey(opts = {}) {
@@ -156,9 +186,15 @@ function getStoredProgress(bookKey) {
   const bookState = readBookScopedState(bookKey);
   if (!isPlainObject(bookState?.progress)) return null;
   const chapterUrl = normalizeUrl(bookState.progress.chapterUrl);
-  if (!chapterUrl) return null;
+  const chapterPathKey = normalizeChapterPathKey(bookState.progress.chapterPathKey || chapterUrl);
+  const chapterIndex = normalizeChapterIndex(bookState.progress.chapterIndex);
+  const bookUrlNormalized = normalizeUrl(bookState.progress.bookUrlNormalized || bookKey);
+  if (!chapterUrl && !chapterPathKey && chapterIndex == null) return null;
   return {
     chapterUrl,
+    chapterPathKey,
+    chapterIndex,
+    bookUrlNormalized,
     ratio: clamp01(Number(bookState.progress.ratio)),
     updatedAt: Number(bookState.progress.updatedAt) || Date.now(),
   };
@@ -169,6 +205,38 @@ function findChapterUrlByNormalized(chapters, normalizedChapterUrl) {
   if (!target) return null;
   const hit = (chapters || []).find((c) => normalizeUrl(c.url) === target);
   return hit?.url || null;
+}
+
+function findChapterUrlByPathKey(chapters, chapterPathKey) {
+  const target = normalizeChapterPathKey(chapterPathKey);
+  if (!target) return null;
+  const hit = (chapters || []).find((c) => normalizeChapterPathKey(c.url) === target);
+  return hit?.url || null;
+}
+
+function findChapterUrlByProgress(chapters, progress) {
+  if (!progress) return null;
+  const byUrl = findChapterUrlByNormalized(chapters, progress.chapterUrl);
+  if (byUrl) return byUrl;
+  const byPathKey = findChapterUrlByPathKey(chapters, progress.chapterPathKey);
+  if (byPathKey) return byPathKey;
+  const chapterIndex = normalizeChapterIndex(progress.chapterIndex);
+  if (chapterIndex != null) {
+    const idx = chapterIndex - 1;
+    const hit = chapters?.[idx];
+    if (hit?.url) return hit.url;
+  }
+  return null;
+}
+
+function isProgressForChapter(progress, chapterUrl, chapterIdx) {
+  if (!progress) return false;
+  const normalizedChapterUrl = normalizeUrl(chapterUrl);
+  if (progress.chapterUrl && normalizedChapterUrl && progress.chapterUrl === normalizedChapterUrl) return true;
+  const chapterPathKey = normalizeChapterPathKey(chapterUrl);
+  if (progress.chapterPathKey && chapterPathKey && progress.chapterPathKey === chapterPathKey) return true;
+  const normalizedIdx = normalizeChapterIndex(Number(chapterIdx) + 1);
+  return progress.chapterIndex != null && normalizedIdx != null && progress.chapterIndex === normalizedIdx;
 }
 
 const state = {
@@ -188,10 +256,12 @@ const state = {
   repaginateToken: 0,
   currentBookKey: "",
   pendingRestore: null,
+  hintTimer: null,
 };
 
 const BRAND_SUB_IDLE = "可传入 dmxs.org URL（#u=...），或在上方输入书籍链接";
 const EMPTY_CHAPTER_TITLE = "未加载内容";
+const DEFAULT_HINT_TEXT = "点此调字体";
 const EMPTY_GUIDE_PARAGRAPHS = [
   "请在上方输入 dmxs.org 书籍 URL 后点击 Open。",
   "也可以通过地址栏 #u=... 传入 URL，页面会自动打开。",
@@ -208,23 +278,24 @@ function applyTopbarVisibility() {
 }
 
 async function repaginateCurrentChapter(opts = {}) {
-  if (!state.chapter) return;
+  if (!state.chapter) return null;
   const token = ++state.repaginateToken;
   const preserveProgress = opts.preserveProgress !== false;
   const shouldWait = opts.waitForLayout !== false;
+  const oldTotal = Math.max(1, state.pages.length || 1);
+  const oldPageIdx = Math.max(0, state.pageIdx || 0);
 
   let oldRatio = 0;
   if (preserveProgress) {
-    const oldTotal = Math.max(1, state.pages.length || 1);
     oldRatio = state.pageIdx / Math.max(1, oldTotal - 1);
   }
 
   if (shouldWait) await waitForLayoutStable();
-  if (token !== state.repaginateToken) return;
-  if (!state.chapter) return;
+  if (token !== state.repaginateToken) return null;
+  if (!state.chapter) return null;
 
   state.pages = paginate(state.chapter.paragraphs || []);
-  if (token !== state.repaginateToken) return;
+  if (token !== state.repaginateToken) return null;
 
   const total = Math.max(1, state.pages.length || 1);
   if (preserveProgress) {
@@ -234,6 +305,29 @@ async function repaginateCurrentChapter(opts = {}) {
   }
   renderPage();
   saveProgressForCurrentBook();
+  return {
+    oldTotal,
+    newTotal: total,
+    oldPageIdx,
+    newPageIdx: state.pageIdx,
+  };
+}
+
+async function forceReflowCurrentChapter(opts = {}) {
+  if (!state.chapter) return null;
+  const result = await repaginateCurrentChapter({
+    preserveProgress: opts.preserveProgress !== false,
+    waitForLayout: opts.waitForLayout !== false,
+  });
+  if (!result) return null;
+  if (opts.showHint !== false) {
+    const msg =
+      result.oldTotal !== result.newTotal
+        ? `已重排 ${result.oldTotal}->${result.newTotal} 页`
+        : "已重排（页数未变）";
+    showHint(msg, { autoResetMs: 1400 });
+  }
+  return result;
 }
 
 async function repaginateForViewportModeSwitch() {
@@ -270,6 +364,53 @@ function isTopTap(clientY, rect) {
   const y = clientY - rect.top;
   const topZoneH = Math.max(56, Math.min(120, rect.height * 0.18));
   return y >= 0 && y <= topZoneH;
+}
+
+function showHint(text, opts = {}) {
+  const nextText = String(text || "").trim() || DEFAULT_HINT_TEXT;
+  els.hint.textContent = nextText;
+  if (state.hintTimer) {
+    clearTimeout(state.hintTimer);
+    state.hintTimer = null;
+  }
+  const autoResetMs = Number(opts.autoResetMs) || 0;
+  if (autoResetMs > 0) {
+    state.hintTimer = setTimeout(() => {
+      state.hintTimer = null;
+      els.hint.textContent = DEFAULT_HINT_TEXT;
+    }, autoResetMs);
+  }
+}
+
+function detectWeightDelta(fontFamily) {
+  if (!fontFamily || !document.body) return 0;
+  const probe = document.createElement("span");
+  probe.textContent = "阅读字体粗细AaBb123456789";
+  probe.style.position = "fixed";
+  probe.style.left = "-9999px";
+  probe.style.top = "0";
+  probe.style.visibility = "hidden";
+  probe.style.whiteSpace = "nowrap";
+  probe.style.pointerEvents = "none";
+  probe.style.fontFamily = fontFamily;
+  probe.style.fontSize = `${state.fontPx}px`;
+  probe.style.lineHeight = "1";
+  probe.style.fontWeight = "400";
+  document.body.appendChild(probe);
+  const w400 = probe.getBoundingClientRect().width;
+  probe.style.fontWeight = "700";
+  const w700 = probe.getBoundingClientRect().width;
+  probe.remove();
+  return Math.abs(w700 - w400);
+}
+
+function ensureReadableWeightFont() {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const currentFamily =
+    rootStyle.getPropertyValue("--reader-font-family").trim() || READER_FONT_STACK_DEFAULT;
+  const currentDelta = detectWeightDelta(currentFamily);
+  if (currentDelta >= WEIGHT_PROBE_MIN_DELTA) return;
+  document.documentElement.style.setProperty("--reader-font-family", READER_FONT_STACK_FALLBACK);
 }
 
 function setFontPx(px) {
@@ -323,17 +464,27 @@ function saveProgressForCurrentBook() {
   if (!chapterUrl) return;
   const totalPages = Math.max(1, state.pages.length || 1);
   const ratio = totalPages > 1 ? clamp01(state.pageIdx / (totalPages - 1)) : 0;
+  const chapterIndex = normalizeChapterIndex(
+    state.chapterIdx >= 0 ? state.chapterIdx + 1 : state.chapter?.chapterIndex
+  );
+  const chapterPathKey = normalizeChapterPathKey(chapterUrl);
+  const bookUrlNormalized = normalizeUrl(state.book?.url || state.chapter?.bookUrl || state.currentBookKey);
+  const progress = {
+    chapterUrl,
+    chapterPathKey,
+    ratio,
+    updatedAt: Date.now(),
+  };
+  if (chapterIndex != null) progress.chapterIndex = chapterIndex;
+  if (bookUrlNormalized) progress.bookUrlNormalized = bookUrlNormalized;
   patchBookScopedState(state.currentBookKey, {
-    progress: {
-      chapterUrl,
-      ratio,
-      updatedAt: Date.now(),
-    },
+    progress,
   });
 }
 
 setFontPx(state.fontPx);
 setFontWeight(state.fontWeight);
+ensureReadableWeightFont();
 
 function showDrawer(open) {
   const isMobile = window.matchMedia("(max-width: 980px)").matches;
@@ -354,6 +505,33 @@ function escapeHtml(s) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function sanitizeFilename(name) {
+  const cleaned = String(name || "danmei")
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || "danmei";
+}
+
+function downloadTextFile(filename, content) {
+  const text = String(content || "");
+  const blob = new Blob([`\uFEFF${text}`], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function setExportButtonsDisabled(disabled) {
+  const next = !!disabled;
+  if (els.exportTxtTop) els.exportTxtTop.disabled = next;
+  if (els.exportTxt) els.exportTxt.disabled = next;
 }
 
 function htmlToParagraphs(html) {
@@ -415,6 +593,7 @@ function renderEmptyState() {
   setFontSheetOpen(false);
   els.brandSub.textContent = BRAND_SUB_IDLE;
   els.introCard.hidden = true;
+  setExportButtonsDisabled(true);
   els.drawerTitle.textContent = "章节";
   els.chapterSearch.value = "";
   renderChapters("");
@@ -422,6 +601,7 @@ function renderEmptyState() {
   els.chapterTitle.textContent = EMPTY_CHAPTER_TITLE;
   els.pageMeta.textContent = "";
   els.pageText.innerHTML = EMPTY_GUIDE_PARAGRAPHS.map((t) => `<p>${escapeHtml(t)}</p>`).join("");
+  showHint(DEFAULT_HINT_TEXT);
   els.progress.textContent = "";
   els.loadingOverlay.hidden = true;
 }
@@ -503,6 +683,7 @@ function paginate(paragraphs) {
   // Mirror the actual reading style and box size.
   measure.style.width = `${Math.max(1, width)}px`;
   measure.style.padding = style.padding;
+  measure.style.fontFamily = style.fontFamily;
   measure.style.fontSize = style.fontSize;
   measure.style.fontWeight = style.fontWeight;
   measure.style.lineHeight = style.lineHeight;
@@ -623,6 +804,7 @@ async function loadBook(url) {
     state.book = book;
     state.currentBookKey = bookKey;
     state.chapters = book.chapters || [];
+    setExportButtonsDisabled(!state.chapters.length);
     state.chapterIdx = -1;
     state.chapter = null;
     state.pendingRestore = null;
@@ -642,7 +824,7 @@ async function loadBook(url) {
     const storedProgress = getStoredProgress(bookKey);
     let initialChapterUrl = first;
     if (storedProgress) {
-      const restoredChapterUrl = findChapterUrlByNormalized(state.chapters, storedProgress.chapterUrl);
+      const restoredChapterUrl = findChapterUrlByProgress(state.chapters, storedProgress);
       if (restoredChapterUrl) {
         state.pendingRestore = storedProgress;
         initialChapterUrl = restoredChapterUrl;
@@ -684,8 +866,9 @@ function renderBookCard(book) {
 }
 
 function findChapterIndexByUrl(url) {
-  const u = String(url || "");
-  return state.chapters.findIndex((c) => c.url === u);
+  const u = normalizeUrl(url);
+  if (!u) return -1;
+  return state.chapters.findIndex((c) => normalizeUrl(c.url) === u);
 }
 
 async function loadChapter(url, opts = {}) {
@@ -720,6 +903,7 @@ async function loadChapter(url, opts = {}) {
         });
         applyScopedFontForCurrentBook();
         state.chapters = book.chapters || [];
+        setExportButtonsDisabled(!state.chapters.length);
         renderBookCard(book);
         renderChapters(els.chapterSearch.value);
       } catch {
@@ -729,6 +913,30 @@ async function loadChapter(url, opts = {}) {
 
     state.chapterIdx = findChapterIndexByUrl(chapter.url);
     if (state.chapterIdx >= 0) renderChapters(els.chapterSearch.value);
+
+    // Direct chapter URL open: after backfilling book list, try restoring saved progress.
+    const shouldTryProgressRestore = opts.tryProgressRestore === true && !opts.fromProgressRestore;
+    if (shouldTryProgressRestore && state.currentBookKey) {
+      const storedProgress = getStoredProgress(state.currentBookKey);
+      if (storedProgress) {
+        const targetChapterUrl = findChapterUrlByProgress(state.chapters, storedProgress);
+        const currentChapterUrl = normalizeUrl(chapter.url);
+        if (targetChapterUrl && normalizeUrl(targetChapterUrl) !== currentChapterUrl) {
+          state.pendingRestore = storedProgress;
+          await loadChapter(targetChapterUrl, {
+            openDrawer: false,
+            compactIntro: opts.compactIntro,
+            skipLoading: true,
+            fromProgressRestore: true,
+            tryProgressRestore: false,
+          });
+          return;
+        }
+        if (isProgressForChapter(storedProgress, chapter.url, state.chapterIdx)) {
+          state.pendingRestore = storedProgress;
+        }
+      }
+    }
 
     if (state.book) els.introCard.hidden = false;
     els.chapterTitle.textContent = chapter.title || "Chapter";
@@ -742,9 +950,8 @@ async function loadChapter(url, opts = {}) {
     await waitForLayoutStable();
     state.pages = paginate(chapter.paragraphs || []);
     state.pageIdx = 0;
-    const normalizedChapterUrl = normalizeUrl(chapter.url);
     if (state.pendingRestore) {
-      if (state.pendingRestore.chapterUrl === normalizedChapterUrl) {
+      if (isProgressForChapter(state.pendingRestore, chapter.url, state.chapterIdx)) {
         const totalPages = Math.max(1, state.pages.length || 1);
         const page = Math.round(state.pendingRestore.ratio * Math.max(0, totalPages - 1));
         state.pageIdx = Math.max(0, Math.min(totalPages - 1, page));
@@ -763,10 +970,63 @@ async function loadChapter(url, opts = {}) {
   }
 }
 
+async function exportBookToTxt() {
+  if (state.isLoading) return;
+  const chapters = state.chapters || [];
+  if (!chapters.length) {
+    alert("当前没有可导出的章节。");
+    return;
+  }
+
+  const bookTitle = String(state.book?.title || "danmei").trim() || "danmei";
+  const fileName = `${sanitizeFilename(bookTitle)}.txt`;
+  const blocks = [];
+  const total = chapters.length;
+
+  setExportButtonsDisabled(true);
+  setLoading(true, `导出TXT中 0/${total}...`, "export");
+  try {
+    for (let i = 0; i < total; i += 1) {
+      const chapterMeta = chapters[i];
+      const chapter = await apiGet("/api/chapter", { url: chapterMeta.url });
+      const paragraphs = Array.isArray(chapter.paragraphs)
+        ? chapter.paragraphs.map((p) => String(p || "").trim()).filter(Boolean)
+        : [];
+      const body = paragraphs.join("\r\n\r\n");
+      const separator = `\u3010===== 章节 ${i + 1}/${total} =====\u3011`;
+
+      blocks.push(separator);
+      if (body) blocks.push(body);
+      else blocks.push("（本章无正文）");
+
+      setLoading(true, `导出TXT中 ${i + 1}/${total}...`, "export");
+    }
+
+    const header = [
+      `书名：${bookTitle}`,
+      state.book?.author ? `作者：${state.book.author}` : "",
+      `章节总数：${total}`,
+      "分隔标记：每章以【===== 章节 i/total =====】开头",
+      `导出时间：${new Date().toLocaleString()}`,
+    ]
+      .filter(Boolean)
+      .join("\r\n");
+    const content = [header, "", blocks.join("\r\n\r\n")].join("\r\n");
+    downloadTextFile(fileName, content);
+    showHint(`已导出 ${total} 章`, { autoResetMs: 2200 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err || "未知错误");
+    alert(`导出失败：${msg}`);
+  } finally {
+    setLoading(false);
+    setExportButtonsDisabled(!state.chapters.length);
+  }
+}
+
 async function openUrl(url) {
   const u = String(url || "").trim();
   if (!u) return;
-  if (u.includes("/view/")) return loadChapter(u, { openDrawer: false });
+  if (u.includes("/view/")) return loadChapter(u, { openDrawer: false, tryProgressRestore: true });
   return loadBook(u);
 }
 
@@ -799,18 +1059,18 @@ function goPrev() {
 function adjustFont(delta) {
   setFontPx(state.fontPx + delta);
   if (!state.chapter) return;
-  void repaginateCurrentChapter({ preserveProgress: true, waitForLayout: true });
+  void forceReflowCurrentChapter({ preserveProgress: true, waitForLayout: true, showHint: false });
 }
 
 function adjustFontWeight(delta) {
   setFontWeight(state.fontWeight + delta * FONT_WEIGHT_STEP);
   if (!state.chapter) return;
-  void repaginateCurrentChapter({ preserveProgress: true, waitForLayout: true });
+  void forceReflowCurrentChapter({ preserveProgress: true, waitForLayout: true, showHint: false });
 }
 
 function reflowCurrentChapter() {
   if (!state.chapter) return;
-  void repaginateCurrentChapter({ preserveProgress: true, waitForLayout: true });
+  void forceReflowCurrentChapter({ preserveProgress: true, waitForLayout: true, showHint: true });
 }
 
 function openFontSheet() {
@@ -867,12 +1127,19 @@ els.closeFontSheet.addEventListener("click", () => setFontSheetOpen(false));
 
 els.chapterSearch.addEventListener("input", () => renderChapters(els.chapterSearch.value));
 els.chapterList.addEventListener("click", (e) => {
+  if (state.isLoading) return;
   const item = e.target.closest(".chapterItem");
   if (!item) return;
   const idx = Number(item.getAttribute("data-idx"));
   const chap = state.chapters[idx];
   if (!chap) return;
   loadChapter(chap.url, { openDrawer: false, fromBook: true });
+});
+els.exportTxt.addEventListener("click", () => {
+  void exportBookToTxt();
+});
+els.exportTxtTop?.addEventListener("click", () => {
+  void exportBookToTxt();
 });
 
 els.pageBody.addEventListener("click", (e) => {
@@ -940,6 +1207,16 @@ window.addEventListener("resize", () => {
 
 window.addEventListener("beforeunload", () => {
   saveProgressForCurrentBook();
+});
+
+window.addEventListener("pagehide", () => {
+  saveProgressForCurrentBook();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    saveProgressForCurrentBook();
+  }
 });
 
 // Initial state: prefer hash, then last URL; otherwise show an input hint.
