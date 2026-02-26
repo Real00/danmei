@@ -31,6 +31,10 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Generate timestamp tag (Asia/Shanghai)
+        id: ts
+        run: echo "value=$(TZ=Asia/Shanghai date +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -38,7 +42,7 @@ jobs:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/danmei
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=short
+            type=raw,value=${{ steps.ts.outputs.value }}
             type=ref,event=tag
 
       - name: Build and push

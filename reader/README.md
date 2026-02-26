@@ -14,9 +14,11 @@ Open `http://localhost:8787`.
 
 ## Usage
 
+- If there is no `#u` hash URL and no local `danmei_lastUrl`, the app stays idle and prompts for a URL (no sample auto-open).
+- Pass a URL via hash like `#u=https%3A%2F%2Fwww.dmxs.org%2Fbook%2F21781.html` to auto-open on load, or let it restore `danmei_lastUrl`.
 - Paste a book URL like `https://www.dmxs.org/book/21781.html` in the top input.
 - Chapters drawer is collapsed by default (`目录` button).
-- Loads Chapter 1 by default.
+- After opening a book, it loads Chapter 1 by default.
 - Swipe left/right (mobile) or use left/right arrow keys (PC) to flip pages.
 - On the last page of a chapter, flipping forward switches to the next chapter automatically.
 
@@ -44,4 +46,4 @@ Required GitHub repository secrets:
 
 Published image:
 - `${DOCKERHUB_USERNAME}/danmei`
-- Tags include `latest` (default branch), short commit SHA, and Git tags.
+- Tags include `latest` (default branch), timestamp (`YYYYMMDDHHmmss`, Asia/Shanghai), and Git tags.

@@ -39,11 +39,15 @@ const els = {
 
   fontMinus: document.getElementById("fontMinus"),
   fontPlus: document.getElementById("fontPlus"),
+  weightMinus: document.getElementById("weightMinus"),
+  weightPlus: document.getElementById("weightPlus"),
   reflow: document.getElementById("reflow"),
   sheetScrim: document.getElementById("sheetScrim"),
   fontSheet: document.getElementById("fontSheet"),
   fontMinusSheet: document.getElementById("fontMinusSheet"),
   fontPlusSheet: document.getElementById("fontPlusSheet"),
+  weightMinusSheet: document.getElementById("weightMinusSheet"),
+  weightPlusSheet: document.getElementById("weightPlusSheet"),
   reflowSheet: document.getElementById("reflowSheet"),
   closeFontSheet: document.getElementById("closeFontSheet"),
 };
@@ -57,6 +61,116 @@ function syncTopbarHeight() {
 
 syncTopbarHeight();
 
+const DEFAULT_FONT_PX = 18;
+const DEFAULT_FONT_WEIGHT = 500;
+const MIN_FONT_WEIGHT = 300;
+const MAX_FONT_WEIGHT = 900;
+const FONT_WEIGHT_STEP = 100;
+const READER_STATE_KEY = "danmei_reader_state_v1";
+const READER_STATE_VERSION = 1;
+
+let readerStateCache = null;
+
+function createEmptyReaderState() {
+  return { version: READER_STATE_VERSION, books: {} };
+}
+
+function isPlainObject(v) {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+function clamp01(n) {
+  return Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0));
+}
+
+function normalizeUrl(url) {
+  const u = String(url || "").trim();
+  if (!u) return "";
+  try {
+    const parsed = new URL(u);
+    parsed.hash = "";
+    if (parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    return parsed.toString();
+  } catch {
+    return u;
+  }
+}
+
+function resolveBookKey(opts = {}) {
+  return normalizeUrl(opts.bookUrl || opts.chapterBookUrl || opts.inputUrl || "");
+}
+
+function readReaderState() {
+  if (readerStateCache) return readerStateCache;
+  try {
+    const raw = localStorage.getItem(READER_STATE_KEY);
+    if (!raw) {
+      readerStateCache = createEmptyReaderState();
+      return readerStateCache;
+    }
+    const parsed = JSON.parse(raw);
+    if (!isPlainObject(parsed) || !isPlainObject(parsed.books)) throw new Error("Invalid reader state");
+    readerStateCache = { version: READER_STATE_VERSION, books: parsed.books };
+  } catch {
+    readerStateCache = createEmptyReaderState();
+  }
+  return readerStateCache;
+}
+
+function writeReaderState() {
+  try {
+    localStorage.setItem(READER_STATE_KEY, JSON.stringify(readReaderState()));
+  } catch {
+    // Ignore quota / privacy mode write failures.
+  }
+}
+
+function readBookScopedState(bookKey) {
+  if (!bookKey) return null;
+  const stateObj = readReaderState();
+  const val = stateObj.books[bookKey];
+  return isPlainObject(val) ? val : null;
+}
+
+function patchBookScopedState(bookKey, partial) {
+  if (!bookKey || !isPlainObject(partial)) return;
+  const stateObj = readReaderState();
+  const prev = readBookScopedState(bookKey) || {};
+  stateObj.books[bookKey] = { ...prev, ...partial };
+  writeReaderState();
+}
+
+function getStoredFontPx(bookKey) {
+  const bookState = readBookScopedState(bookKey);
+  const n = Number(bookState?.fontPx);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getStoredFontWeight(bookKey) {
+  const bookState = readBookScopedState(bookKey);
+  const n = Number(bookState?.fontWeight);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getStoredProgress(bookKey) {
+  const bookState = readBookScopedState(bookKey);
+  if (!isPlainObject(bookState?.progress)) return null;
+  const chapterUrl = normalizeUrl(bookState.progress.chapterUrl);
+  if (!chapterUrl) return null;
+  return {
+    chapterUrl,
+    ratio: clamp01(Number(bookState.progress.ratio)),
+    updatedAt: Number(bookState.progress.updatedAt) || Date.now(),
+  };
+}
+
+function findChapterUrlByNormalized(chapters, normalizedChapterUrl) {
+  const target = normalizeUrl(normalizedChapterUrl);
+  if (!target) return null;
+  const hit = (chapters || []).find((c) => normalizeUrl(c.url) === target);
+  return hit?.url || null;
+}
+
 const state = {
   book: null,
   chapters: [],
@@ -64,14 +178,24 @@ const state = {
   chapter: null,
   pages: [],
   pageIdx: 0,
-  fontPx: Number(localStorage.getItem("danmei_fontPx") || 18),
+  fontPx: DEFAULT_FONT_PX,
+  fontWeight: DEFAULT_FONT_WEIGHT,
   lastUrl: localStorage.getItem("danmei_lastUrl") || "",
   isLoading: false,
   loadingKind: "",
   topVisible: true,
   fontSheetOpen: false,
   repaginateToken: 0,
+  currentBookKey: "",
+  pendingRestore: null,
 };
+
+const BRAND_SUB_IDLE = "可传入 dmxs.org URL（#u=...），或在上方输入书籍链接";
+const EMPTY_CHAPTER_TITLE = "未加载内容";
+const EMPTY_GUIDE_PARAGRAPHS = [
+  "请在上方输入 dmxs.org 书籍 URL 后点击 Open。",
+  "也可以通过地址栏 #u=... 传入 URL，页面会自动打开。",
+];
 
 function isMobileViewport() {
   return window.matchMedia("(max-width: 980px)").matches;
@@ -109,6 +233,7 @@ async function repaginateCurrentChapter(opts = {}) {
     state.pageIdx = Math.max(0, Math.min(state.pageIdx, total - 1));
   }
   renderPage();
+  saveProgressForCurrentBook();
 }
 
 async function repaginateForViewportModeSwitch() {
@@ -148,14 +273,67 @@ function isTopTap(clientY, rect) {
 }
 
 function setFontPx(px) {
-  const clamped = Math.max(14, Math.min(26, px));
+  const target = Number.isFinite(Number(px)) ? Number(px) : DEFAULT_FONT_PX;
+  const clamped = Math.max(14, Math.min(26, target));
   state.fontPx = clamped;
-  localStorage.setItem("danmei_fontPx", String(clamped));
   document.documentElement.style.setProperty("--page-font", `${clamped}px`);
+  if (state.currentBookKey) {
+    patchBookScopedState(state.currentBookKey, { fontPx: clamped });
+  }
+}
+
+function setFontWeight(weight) {
+  const target = Number.isFinite(Number(weight)) ? Number(weight) : DEFAULT_FONT_WEIGHT;
+  const clamped = Math.max(
+    MIN_FONT_WEIGHT,
+    Math.min(MAX_FONT_WEIGHT, Math.round(target / FONT_WEIGHT_STEP) * FONT_WEIGHT_STEP)
+  );
+  state.fontWeight = clamped;
+  document.documentElement.style.setProperty("--page-weight", String(clamped));
+  if (state.currentBookKey) {
+    patchBookScopedState(state.currentBookKey, { fontWeight: clamped });
+  }
+}
+
+function applyScopedFontForCurrentBook() {
+  if (!state.currentBookKey) return;
+  const savedFontPx = getStoredFontPx(state.currentBookKey);
+  const nextFontPx = savedFontPx == null ? DEFAULT_FONT_PX : savedFontPx;
+  const fontPx = Math.max(14, Math.min(26, nextFontPx));
+  if (state.fontPx !== fontPx) {
+    state.fontPx = fontPx;
+    document.documentElement.style.setProperty("--page-font", `${fontPx}px`);
+  }
+
+  const savedWeight = getStoredFontWeight(state.currentBookKey);
+  const nextWeight = savedWeight == null ? DEFAULT_FONT_WEIGHT : savedWeight;
+  const weight = Math.max(
+    MIN_FONT_WEIGHT,
+    Math.min(MAX_FONT_WEIGHT, Math.round(nextWeight / FONT_WEIGHT_STEP) * FONT_WEIGHT_STEP)
+  );
+  if (state.fontWeight !== weight) {
+    state.fontWeight = weight;
+    document.documentElement.style.setProperty("--page-weight", String(weight));
+  }
+}
+
+function saveProgressForCurrentBook() {
+  if (!state.currentBookKey || !state.chapter?.url) return;
+  const chapterUrl = normalizeUrl(state.chapter.url);
+  if (!chapterUrl) return;
+  const totalPages = Math.max(1, state.pages.length || 1);
+  const ratio = totalPages > 1 ? clamp01(state.pageIdx / (totalPages - 1)) : 0;
+  patchBookScopedState(state.currentBookKey, {
+    progress: {
+      chapterUrl,
+      ratio,
+      updatedAt: Date.now(),
+    },
+  });
 }
 
 setFontPx(state.fontPx);
-if (state.lastUrl) els.urlInput.value = state.lastUrl;
+setFontWeight(state.fontWeight);
 
 function showDrawer(open) {
   const isMobile = window.matchMedia("(max-width: 980px)").matches;
@@ -214,12 +392,38 @@ function setLoading(isLoading, label, kind = "") {
   state.isLoading = isLoading;
   state.loadingKind = isLoading ? String(kind || "") : "";
   els.urlInput.disabled = isLoading;
-  els.brandSub.textContent = isLoading ? label || "Loading..." : "Paste a dmxs.org book URL";
+  els.brandSub.textContent = isLoading ? label || "Loading..." : BRAND_SUB_IDLE;
   const showChapterOverlay = isLoading && state.loadingKind === "chapter";
   els.loadingOverlay.hidden = !showChapterOverlay;
   if (showChapterOverlay) {
     els.loadingLabel.textContent = label || "加载中...";
   }
+}
+
+function renderEmptyState() {
+  state.book = null;
+  state.chapters = [];
+  state.chapterIdx = -1;
+  state.chapter = null;
+  state.currentBookKey = "";
+  state.pendingRestore = null;
+  state.repaginateToken += 1;
+  state.pages = [];
+  state.pageIdx = 0;
+
+  setTopbarVisible(true, { skipRepaginate: true });
+  setFontSheetOpen(false);
+  els.brandSub.textContent = BRAND_SUB_IDLE;
+  els.introCard.hidden = true;
+  els.drawerTitle.textContent = "章节";
+  els.chapterSearch.value = "";
+  renderChapters("");
+
+  els.chapterTitle.textContent = EMPTY_CHAPTER_TITLE;
+  els.pageMeta.textContent = "";
+  els.pageText.innerHTML = EMPTY_GUIDE_PARAGRAPHS.map((t) => `<p>${escapeHtml(t)}</p>`).join("");
+  els.progress.textContent = "";
+  els.loadingOverlay.hidden = true;
 }
 
 function renderChapters(filter = "") {
@@ -300,6 +504,7 @@ function paginate(paragraphs) {
   measure.style.width = `${Math.max(1, width)}px`;
   measure.style.padding = style.padding;
   measure.style.fontSize = style.fontSize;
+  measure.style.fontWeight = style.fontWeight;
   measure.style.lineHeight = style.lineHeight;
   measure.style.letterSpacing = style.letterSpacing;
   const availableH = Math.max(120, height);
@@ -414,13 +619,17 @@ async function loadBook(url) {
   setLoading(true, "Fetching book...", "book");
   try {
     const book = await apiGet("/api/book", { url });
+    const bookKey = resolveBookKey({ bookUrl: book.url, inputUrl: url });
     state.book = book;
+    state.currentBookKey = bookKey;
     state.chapters = book.chapters || [];
     state.chapterIdx = -1;
     state.chapter = null;
+    state.pendingRestore = null;
     state.repaginateToken += 1;
     state.pages = [];
     state.pageIdx = 0;
+    applyScopedFontForCurrentBook();
     setTopbarVisible(true, { skipRepaginate: true });
     setFontSheetOpen(false);
 
@@ -430,6 +639,15 @@ async function loadBook(url) {
     renderChapters(els.chapterSearch.value);
 
     const first = pickFirstChapterUrl(book);
+    const storedProgress = getStoredProgress(bookKey);
+    let initialChapterUrl = first;
+    if (storedProgress) {
+      const restoredChapterUrl = findChapterUrlByNormalized(state.chapters, storedProgress.chapterUrl);
+      if (restoredChapterUrl) {
+        state.pendingRestore = storedProgress;
+        initialChapterUrl = restoredChapterUrl;
+      }
+    }
     els.readFirst.disabled = !first;
     els.readFirst.onclick = () => first && loadChapter(first, { openDrawer: false, fromBook: true });
     els.openChapters.onclick = () => showDrawer(true);
@@ -437,10 +655,10 @@ async function loadBook(url) {
     localStorage.setItem("danmei_lastUrl", url);
     setHash(url);
 
-    // Requirement: default load Chapter 1, while keeping the intro accessible.
-    if (first) {
+    // Auto-open saved chapter if available; otherwise Chapter 1.
+    if (initialChapterUrl) {
       setLoading(true, "Fetching chapter...", "chapter");
-      await loadChapter(first, {
+      await loadChapter(initialChapterUrl, {
         openDrawer: false,
         fromBook: true,
         compactIntro: true,
@@ -476,14 +694,31 @@ async function loadChapter(url, opts = {}) {
   try {
     const chapter = await apiGet("/api/chapter", { url });
     state.chapter = chapter;
+    state.currentBookKey = resolveBookKey({
+      bookUrl: chapter.bookUrl || state.book?.url,
+      chapterBookUrl: state.book?.url,
+      inputUrl: url,
+    });
+    applyScopedFontForCurrentBook();
     state.repaginateToken += 1;
     setFontSheetOpen(false);
 
     // If user pasted a chapter URL directly, backfill book/chapter list.
-    if ((!state.book || !state.chapters.length) && chapter.bookUrl) {
+    const chapterBookKey = resolveBookKey({ bookUrl: chapter.bookUrl });
+    const currentBookKey = resolveBookKey({ bookUrl: state.book?.url });
+    const shouldBackfillBook =
+      !!chapter.bookUrl &&
+      (!state.book || !state.chapters.length || (chapterBookKey && currentBookKey && chapterBookKey !== currentBookKey));
+    if (shouldBackfillBook) {
       try {
         const book = await apiGet("/api/book", { url: chapter.bookUrl });
         state.book = book;
+        state.currentBookKey = resolveBookKey({
+          bookUrl: state.book?.url,
+          chapterBookUrl: chapter.bookUrl,
+          inputUrl: url,
+        });
+        applyScopedFontForCurrentBook();
         state.chapters = book.chapters || [];
         renderBookCard(book);
         renderChapters(els.chapterSearch.value);
@@ -507,7 +742,17 @@ async function loadChapter(url, opts = {}) {
     await waitForLayoutStable();
     state.pages = paginate(chapter.paragraphs || []);
     state.pageIdx = 0;
+    const normalizedChapterUrl = normalizeUrl(chapter.url);
+    if (state.pendingRestore) {
+      if (state.pendingRestore.chapterUrl === normalizedChapterUrl) {
+        const totalPages = Math.max(1, state.pages.length || 1);
+        const page = Math.round(state.pendingRestore.ratio * Math.max(0, totalPages - 1));
+        state.pageIdx = Math.max(0, Math.min(totalPages - 1, page));
+      }
+      state.pendingRestore = null;
+    }
     renderPage();
+    saveProgressForCurrentBook();
 
     if (opts.openDrawer === false) showDrawer(false);
     if (opts.compactIntro) setIntroCompact(true);
@@ -530,6 +775,7 @@ function goNext() {
   if (state.pageIdx < (state.pages.length - 1)) {
     state.pageIdx += 1;
     renderPage();
+    saveProgressForCurrentBook();
     return;
   }
   if (state.chapter?.nextUrl) {
@@ -542,6 +788,7 @@ function goPrev() {
   if (state.pageIdx > 0) {
     state.pageIdx -= 1;
     renderPage();
+    saveProgressForCurrentBook();
     return;
   }
   if (state.chapter?.prevUrl) {
@@ -551,6 +798,12 @@ function goPrev() {
 
 function adjustFont(delta) {
   setFontPx(state.fontPx + delta);
+  if (!state.chapter) return;
+  void repaginateCurrentChapter({ preserveProgress: true, waitForLayout: true });
+}
+
+function adjustFontWeight(delta) {
+  setFontWeight(state.fontWeight + delta * FONT_WEIGHT_STEP);
   if (!state.chapter) return;
   void repaginateCurrentChapter({ preserveProgress: true, waitForLayout: true });
 }
@@ -659,9 +912,13 @@ window.addEventListener("keydown", (e) => {
 
 els.fontMinus.addEventListener("click", () => adjustFont(-1));
 els.fontPlus.addEventListener("click", () => adjustFont(1));
+els.weightMinus.addEventListener("click", () => adjustFontWeight(-1));
+els.weightPlus.addEventListener("click", () => adjustFontWeight(1));
 els.reflow.addEventListener("click", reflowCurrentChapter);
 els.fontMinusSheet.addEventListener("click", () => adjustFont(-1));
 els.fontPlusSheet.addEventListener("click", () => adjustFont(1));
+els.weightMinusSheet.addEventListener("click", () => adjustFontWeight(-1));
+els.weightPlusSheet.addEventListener("click", () => adjustFontWeight(1));
 els.reflowSheet.addEventListener("click", reflowCurrentChapter);
 
 els.toggleIntro.addEventListener("click", () => {
@@ -681,8 +938,16 @@ window.addEventListener("resize", () => {
   }, 180);
 });
 
-// Initial state: prefer hash, then last URL, otherwise a sample.
-const initial = getHashUrl() || state.lastUrl || "https://www.dmxs.org/book/21781.html";
+window.addEventListener("beforeunload", () => {
+  saveProgressForCurrentBook();
+});
+
+// Initial state: prefer hash, then last URL; otherwise show an input hint.
+const initial = getHashUrl() || state.lastUrl || "";
 els.urlInput.value = initial;
-openUrl(initial);
+if (initial) {
+  openUrl(initial);
+} else {
+  renderEmptyState();
+}
 showDrawer(false);

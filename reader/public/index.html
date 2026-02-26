@@ -14,7 +14,7 @@
         <div class="brandMark">D</div>
         <div class="brandText">
           <div class="brandTitle">Danmei Reader</div>
-          <div class="brandSub" id="brandSub">Paste a dmxs.org book URL</div>
+          <div class="brandSub" id="brandSub">可传入 dmxs.org URL（#u=...），或在上方输入书籍链接</div>
         </div>
       </div>
 
@@ -23,7 +23,7 @@
           class="urlInput"
           id="urlInput"
           inputmode="url"
-          placeholder="https://www.dmxs.org/book/21781.html"
+          placeholder="https://www.dmxs.org/book/xxxx.html"
         />
         <button class="btn btnPrimary" type="submit">Open</button>
         <button class="btn btnGhost" type="button" id="toggleChapters">
@@ -52,6 +52,8 @@
           <div class="typeTools">
             <button class="chip" type="button" id="fontMinus">A-</button>
             <button class="chip" type="button" id="fontPlus">A+</button>
+            <button class="chip" type="button" id="weightMinus">W-</button>
+            <button class="chip" type="button" id="weightPlus">W+</button>
             <button class="chip" type="button" id="reflow">Reflow</button>
           </div>
         </div>
@@ -115,6 +117,8 @@
       <div class="sheetActions">
         <button class="chip" type="button" id="fontMinusSheet">A-</button>
         <button class="chip" type="button" id="fontPlusSheet">A+</button>
+        <button class="chip" type="button" id="weightMinusSheet">W-</button>
+        <button class="chip" type="button" id="weightPlusSheet">W+</button>
         <button class="chip" type="button" id="reflowSheet">Reflow</button>
       </div>
       <button class="btn btnGhost sheetClose" type="button" id="closeFontSheet">
