@@ -29,3 +29,19 @@ Open `http://localhost:8787`.
   - `pnpm add playwright`
   - Ensure browsers are installed per Playwright’s docs for your platform.
 
+## GitHub Actions: Auto Publish to Docker Hub
+
+This repository includes `.github/workflows/docker-publish.yml`.
+
+Trigger:
+- Push to `main`
+- Push tag matching `v*`
+- Manual run via `workflow_dispatch`
+
+Required GitHub repository secrets:
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN` (Docker Hub access token)
+
+Published image:
+- `${DOCKERHUB_USERNAME}/danmei`
+- Tags include `latest` (default branch), short commit SHA, and Git tags.
