@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Danmei Reader</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="bg"></div>
+
+    <header class="topbar">
+      <div class="brand" title="Danmei Reader">
+        <div class="brandMark">D</div>
+        <div class="brandText">
+          <div class="brandTitle">Danmei Reader</div>
+          <div class="brandSub" id="brandSub">Paste a dmxs.org book URL</div>
+        </div>
+      </div>
+
+      <form class="urlForm" id="urlForm" autocomplete="off">
+        <input
+          class="urlInput"
+          id="urlInput"
+          inputmode="url"
+          placeholder="https://www.dmxs.org/book/21781.html"
+        />
+        <button class="btn btnPrimary" type="submit">Open</button>
+        <button class="btn btnGhost" type="button" id="toggleChapters">
+          目录
+        </button>
+        <button class="btn btnGhost" type="button" id="hideTopbar">
+          隐藏顶部
+        </button>
+      </form>
+    </header>
+
+    <main class="main">
+      <aside class="drawer" id="drawer" aria-hidden="true">
+        <div class="drawerHeader">
+          <div class="drawerTitle" id="drawerTitle">章节</div>
+          <button class="btn btnGhost" type="button" id="closeDrawer">
+            Close
+          </button>
+        </div>
+        <div class="drawerTools">
+          <input
+            class="chapterSearch"
+            id="chapterSearch"
+            placeholder="搜索章节..."
+          />
+          <div class="typeTools">
+            <button class="chip" type="button" id="fontMinus">A-</button>
+            <button class="chip" type="button" id="fontPlus">A+</button>
+            <button class="chip" type="button" id="reflow">Reflow</button>
+          </div>
+        </div>
+        <div class="chapterList" id="chapterList"></div>
+      </aside>
+
+      <section class="reader">
+        <div class="card introCard" id="introCard" hidden>
+          <div class="introTop">
+            <div class="introLeft">
+              <div class="introTitle" id="bookTitle"></div>
+              <div class="introMeta" id="bookMeta"></div>
+            </div>
+            <button class="chip" type="button" id="toggleIntro">介绍</button>
+          </div>
+          <div class="introBody" id="bookIntro"></div>
+          <div class="introActions">
+            <button class="btn btnPrimary" type="button" id="readFirst">
+              Read Chapter 1
+            </button>
+            <button class="btn btnGhost" type="button" id="openChapters">
+              Open Chapters
+            </button>
+          </div>
+        </div>
+
+        <div class="card pageCard" id="pageCard">
+          <div class="pageHeader">
+            <div class="chapterTitle" id="chapterTitle">Ready</div>
+            <div class="pageMeta" id="pageMeta"></div>
+          </div>
+
+          <div class="pageBody" id="pageBody">
+            <div class="tapZone left" id="tapLeft" aria-hidden="true"></div>
+            <div class="tapZone right" id="tapRight" aria-hidden="true"></div>
+            <div class="pageText" id="pageText"></div>
+          </div>
+
+          <div
+            class="pageFooter"
+            id="pageFooter"
+            role="button"
+            tabindex="0"
+            aria-label="打开字体设置"
+          >
+            <div class="hint" id="hint">点此调字体</div>
+            <div class="progress" id="progress"></div>
+          </div>
+          <div class="loadingOverlay" id="loadingOverlay" hidden aria-live="polite">
+            <div class="loadingSpinner" aria-hidden="true"></div>
+            <div class="loadingLabel" id="loadingLabel">加载中...</div>
+          </div>
+        </div>
+      </section>
+
+      <div class="scrim" id="scrim" hidden></div>
+    </main>
+    <div class="sheetScrim" id="sheetScrim" hidden></div>
+    <div class="sheet" id="fontSheet" aria-hidden="true">
+      <div class="sheetTitle">字体设置</div>
+      <div class="sheetActions">
+        <button class="chip" type="button" id="fontMinusSheet">A-</button>
+        <button class="chip" type="button" id="fontPlusSheet">A+</button>
+        <button class="chip" type="button" id="reflowSheet">Reflow</button>
+      </div>
+      <button class="btn btnGhost sheetClose" type="button" id="closeFontSheet">
+        关闭
+      </button>
+    </div>
+    <div class="measure" id="measure" aria-hidden="true"></div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
