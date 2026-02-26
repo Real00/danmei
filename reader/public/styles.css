@@ -126,8 +126,8 @@ body {
 
 .urlForm {
   display: grid;
-  grid-template-columns: 1fr auto auto auto auto;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) repeat(6, auto);
+  gap: 8px;
   align-items: center;
 }
 
@@ -162,9 +162,27 @@ body {
   letter-spacing: 0.01em;
 }
 
+/* Keep topbar controls compact without affecting other button groups. */
+.topbar .urlForm .btn {
+  height: 38px;
+  padding: 0 11px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
 .btn:hover {
   border-color: rgba(255, 255, 255, 0.22);
   background: rgba(255, 255, 255, 0.09);
+}
+
+.btn:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.btn.isActive {
+  border-color: rgba(156, 226, 195, 0.58);
+  background: linear-gradient(180deg, rgba(156, 226, 195, 0.24), rgba(156, 226, 195, 0.1));
 }
 
 .btnPrimary {
@@ -318,8 +336,8 @@ body {
 .reader {
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 16px;
 }
 
@@ -328,6 +346,83 @@ body {
   background: linear-gradient(180deg, rgba(16, 28, 44, 0.72), rgba(8, 12, 18, 0.56));
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: var(--shadow);
+}
+
+.searchCard[hidden],
+.introCard[hidden] {
+  display: none !important;
+}
+
+.searchCard {
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.searchForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.searchInput {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--ink);
+  outline: none;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
+
+.searchInput:focus {
+  border-color: rgba(156, 226, 195, 0.55);
+  box-shadow: 0 0 0 3px rgba(156, 226, 195, 0.12);
+}
+
+.searchStatus {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
+
+.searchList {
+  max-height: 230px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.searchItem {
+  width: 100%;
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--ink);
+  padding: 10px 12px;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+}
+
+.searchItem:hover {
+  border-color: rgba(156, 226, 195, 0.45);
+  background: rgba(156, 226, 195, 0.08);
+}
+
+.searchItemTitle {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-weight: 700;
+}
+
+.searchItemUrl {
+  color: var(--faint);
+  font-size: 12px;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
 }
 
 .introCard {
@@ -399,6 +494,7 @@ body {
 
 .pageCard {
   position: relative;
+  flex: 1 1 auto;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
@@ -421,16 +517,31 @@ body {
   font-weight: 900;
   letter-spacing: 0.01em;
   font-size: 15px;
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .pageMeta {
-  color: var(--muted);
+  color: var(--faint);
   font-size: 12px;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   white-space: nowrap;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.pageMeta:hover {
+  color: var(--muted);
+}
+
+.pageMeta:focus-visible {
+  outline: 2px solid rgba(156, 226, 195, 0.72);
+  outline-offset: 2px;
 }
 
 .pageBody {
@@ -504,11 +615,10 @@ body {
 }
 
 .progress {
-  color: rgba(156, 226, 195, 0.95);
+  color: var(--faint);
   font-size: 12px;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  font-weight: 800;
-  letter-spacing: 0.03em;
+  font-weight: 400;
   white-space: nowrap;
 }
 
@@ -634,12 +744,12 @@ body {
   inset: 8px 0 0 0;
 }
 
+.topbarHidden .searchCard,
 .topbarHidden .introCard {
   display: none;
 }
 
 .topbarHidden .reader {
-  grid-template-rows: minmax(0, 1fr);
   gap: 0;
 }
 
@@ -650,15 +760,15 @@ body {
     padding-bottom: 12px;
   }
   .urlForm {
-    grid-template-columns: 1fr auto auto auto;
-  }
-  #hideTopbar {
-    grid-column: 2 / span 3;
+    grid-template-columns: minmax(0, 1fr) repeat(3, auto);
   }
   .main {
     inset: calc(var(--top) + 8px) 0 0 0;
     grid-template-columns: 1fr;
     padding: 12px;
+  }
+  .searchForm {
+    grid-template-columns: 1fr;
   }
   .drawer {
     position: fixed;

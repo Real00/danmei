@@ -3,8 +3,10 @@ import {
   DEFAULT_FONT_PX,
   DEFAULT_FONT_WEIGHT,
   FONT_WEIGHT_STEP,
+  MAX_FONT_PX,
   MAX_BRIGHTNESS,
   MAX_FONT_WEIGHT,
+  MIN_FONT_PX,
   MIN_BRIGHTNESS,
   MIN_FONT_WEIGHT,
   READER_FONT_STACK_DEFAULT,
@@ -56,7 +58,7 @@ export function ensureReadableWeightFont(): void {
 
 export function setFontPx(px: number): void {
   const target = Number.isFinite(Number(px)) ? Number(px) : DEFAULT_FONT_PX;
-  const clamped = Math.max(14, Math.min(26, target));
+  const clamped = Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, target));
   state.fontPx = clamped;
   document.documentElement.style.setProperty("--page-font", `${clamped}px`);
   if (state.currentBookKey) {
@@ -91,7 +93,7 @@ export function applyScopedFontForCurrentBook(): void {
   if (!state.currentBookKey) return;
   const savedFontPx = getStoredFontPx(state.currentBookKey);
   const nextFontPx = savedFontPx == null ? DEFAULT_FONT_PX : savedFontPx;
-  const fontPx = Math.max(14, Math.min(26, nextFontPx));
+  const fontPx = Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, nextFontPx));
   if (state.fontPx !== fontPx) {
     state.fontPx = fontPx;
     document.documentElement.style.setProperty("--page-font", `${fontPx}px`);

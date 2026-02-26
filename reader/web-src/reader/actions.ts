@@ -1,4 +1,4 @@
-import { BRIGHTNESS_STEP, FONT_WEIGHT_STEP } from "../constants";
+import { BRIGHTNESS_STEP, FONT_WEIGHT_STEP, SEARCH_COOLDOWN_MS } from "../constants";
 import { paginate } from "../domain/pagination";
 import { els } from "../dom/elements";
 import { apiGet } from "../services/api";
@@ -19,15 +19,17 @@ import {
 import { state } from "../state/store";
 import { downloadTextFile, sanitizeFilename } from "../utils/text";
 import {
+  getSearchCooldownLeftSec,
   setExportButtonsDisabled,
   setFontSheetOpen,
   setIntroCompact,
+  setIntroPanelOpen,
   setLoading,
   setTopbarVisible,
   showDrawer,
   showHint,
 } from "../ui/layout";
-import { renderBookCard, renderChapters, renderPage } from "../ui/render";
+import { renderBookCard, renderChapters, renderPage, renderSearchResults } from "../ui/render";
 import { findChapterIndexByUrl, pickFirstChapterUrl, setHash } from "./navigation";
 import {
   forceReflowCurrentChapter,
@@ -50,6 +52,7 @@ export async function loadBook(url: string): Promise<void> {
     state.repaginateToken += 1;
     state.pages = [];
     state.pageIdx = 0;
+    setIntroPanelOpen(false);
     applyScopedFontForCurrentBook();
     setTopbarVisible(true, { skipRepaginate: true });
     setFontSheetOpen(false);
@@ -133,6 +136,7 @@ export async function loadChapter(
           chapterBookUrl: chapter.bookUrl,
           inputUrl: url,
         });
+        setIntroPanelOpen(false);
         applyScopedFontForCurrentBook();
         state.chapters = book.chapters || [];
         setExportButtonsDisabled(!state.chapters.length);
@@ -170,14 +174,11 @@ export async function loadChapter(
       }
     }
 
-    if (state.book) els.introCard.hidden = false;
-    els.chapterTitle.textContent = chapter.title || "Chapter";
-    const metaBits = [];
-    if (chapter.bookUrl && state.book?.title) metaBits.push(state.book.title);
-    if (chapter.chapterIndex && chapter.chapterTotal) {
-      metaBits.push(`${chapter.chapterIndex}/${chapter.chapterTotal}`);
-    }
-    els.pageMeta.textContent = metaBits.join("  ·  ");
+    const title = String(state.book?.title || "").trim() || chapter.title || "未命名小说";
+    els.chapterTitle.textContent = title;
+    els.chapterTitle.title = title;
+    els.pageMeta.textContent = "更多设置";
+    els.pageMeta.title = "显示顶部菜单";
 
     await waitForLayoutStable();
     state.pages = paginate(chapter.paragraphs || [], els.pageText, els.measure);
@@ -252,6 +253,84 @@ export async function exportBookToTxt(): Promise<void> {
   } finally {
     setLoading(false);
     setExportButtonsDisabled(!state.chapters.length);
+  }
+}
+
+function clearSearchCooldownTimer(): void {
+  if (!state.searchCooldownTimer) return;
+  clearInterval(state.searchCooldownTimer);
+  state.searchCooldownTimer = null;
+}
+
+function startSearchCooldown(durationMs: number): void {
+  clearSearchCooldownTimer();
+  const duration = Math.max(0, Number(durationMs) || 0);
+  if (!duration) {
+    state.searchCooldownUntil = 0;
+    renderSearchResults();
+    return;
+  }
+
+  state.searchCooldownUntil = Date.now() + duration;
+  const tick = () => {
+    const left = getSearchCooldownLeftSec();
+    if (left <= 0) {
+      state.searchCooldownUntil = 0;
+      clearSearchCooldownTimer();
+      renderSearchResults();
+      return;
+    }
+    renderSearchResults();
+  };
+
+  tick();
+  state.searchCooldownTimer = setInterval(tick, 1000);
+}
+
+export async function searchBooks(keyword: string): Promise<void> {
+  const q = String(keyword || "").trim();
+  state.searchKeyword = q;
+  if (!q) {
+    state.searchResults = [];
+    renderSearchResults();
+    showHint("请输入搜索关键词", { autoResetMs: 1600 });
+    return;
+  }
+
+  const cooldownLeft = getSearchCooldownLeftSec();
+  if (cooldownLeft > 0) {
+    renderSearchResults();
+    showHint(`搜索冷却中，请 ${cooldownLeft} 秒后再试`, { autoResetMs: 1600 });
+    return;
+  }
+
+  state.searchInFlight = true;
+  setLoading(true, "Searching books...", "search");
+  renderSearchResults();
+  try {
+    const payload = await apiGet<Record<string, any>>("/api/search", { q });
+    state.searchKeyword = String(payload.keyword || q).trim();
+    state.searchResults = Array.isArray(payload.results)
+      ? payload.results
+          .map((item) => ({
+            title: String(item?.title || "").trim(),
+            url: String(item?.url || "").trim(),
+          }))
+          .filter((item) => item.title && item.url)
+      : [];
+    renderSearchResults();
+    if (!state.searchResults.length) {
+      showHint("未找到相关书籍", { autoResetMs: 1800 });
+    }
+  } catch (err) {
+    state.searchResults = [];
+    renderSearchResults();
+    const msg = err instanceof Error ? err.message : String(err || "未知错误");
+    showHint(`搜索失败：${msg}`, { autoResetMs: 2600 });
+  } finally {
+    state.searchInFlight = false;
+    setLoading(false);
+    startSearchCooldown(SEARCH_COOLDOWN_MS);
   }
 }
 

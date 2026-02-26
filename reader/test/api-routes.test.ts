@@ -106,3 +106,55 @@ test("chapter route returns 502 on fetch failure", async () => {
   assert.equal(res.body.ok, false);
   assert.match(String(res.body.error || ""), /boom|Failed to fetch chapter/);
 });
+
+test("search route validates missing q", async () => {
+  const counter = { count: 0 };
+  const fetcher = createMockFetcher(counter);
+  const app = createApp({
+    debugEnabled: false,
+    cache: createParsedCache(),
+    fetchers: {
+      fetchHtml: fetcher,
+      fetchHtmlViaFetch: fetcher,
+      fetchHtmlViaPowerShell: fetcher,
+    },
+  });
+
+  const res = await request(app).get("/api/search");
+  assert.equal(res.status, 400);
+  assert.equal(res.body.ok, false);
+});
+
+test("search route returns formatted search results", async () => {
+  const counter = { count: 0 };
+  const fetcher = createMockFetcher(counter);
+  const app = createApp({
+    debugEnabled: false,
+    cache: createParsedCache(),
+    fetchers: {
+      fetchHtml: fetcher,
+      fetchHtmlViaFetch: fetcher,
+      fetchHtmlViaPowerShell: fetcher,
+    },
+    searchService: {
+      async searchBooks(keyword: string) {
+        return {
+          kind: "search",
+          keyword,
+          url: "https://www.dmxs.org/e/search/result/index.html",
+          fetcher: "fetch",
+          results: [{ title: "测试书名", url: "https://www.dmxs.org/book/21781.html" }],
+        };
+      },
+    } as any,
+  });
+
+  const res = await request(app).get("/api/search").query({ q: "测试书名" });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.kind, "search");
+  assert.equal(res.body.keyword, "测试书名");
+  assert.equal(Array.isArray(res.body.results), true);
+  assert.equal(res.body.results.length, 1);
+  assert.equal(res.body.results[0].url, "https://www.dmxs.org/book/21781.html");
+});

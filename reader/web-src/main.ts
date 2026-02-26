@@ -9,6 +9,7 @@ import {
   loadChapter,
   openFontSheet,
   openUrl,
+  searchBooks,
   repaginateCurrentChapter,
   reflowCurrentChapter,
 } from "./reader/actions";
@@ -17,10 +18,14 @@ import { repaginateForViewportModeSwitch } from "./reader/reflow";
 import { ensureReadableWeightFont, saveProgressForCurrentBook, setBrightness, setFontPx, setFontWeight } from "./state/preferences";
 import { state } from "./state/store";
 import {
+  applyPanelVisibility,
   applyTopbarVisibility,
   isTopTap,
   registerTopbarRepaginateHandler,
+  refreshSearchControls,
   setFontSheetOpen,
+  setIntroPanelOpen,
+  setSearchPanelOpen,
   setTopbarVisible,
   showDrawer,
 } from "./ui/layout";
@@ -63,9 +68,46 @@ els.urlForm.addEventListener("submit", (e) => {
   void openUrl(els.urlInput.value);
 });
 
+els.toggleSearchPanel.addEventListener("click", () => {
+  setSearchPanelOpen(!state.searchPanelOpen);
+});
+
+els.toggleIntroPanel.addEventListener("click", () => {
+  if (!state.book) return;
+  setIntroPanelOpen(!state.introPanelOpen);
+});
+
+els.searchForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  void searchBooks(els.searchInput.value);
+});
+
+els.searchList.addEventListener("click", (e: MouseEvent) => {
+  if (state.isLoading) return;
+  const target = e.target as HTMLElement | null;
+  const item = target?.closest(".searchItem") as HTMLElement | null;
+  if (!item) return;
+  const idx = Number(item.getAttribute("data-idx"));
+  const hit = state.searchResults[idx];
+  if (!hit?.url) return;
+  els.urlInput.value = hit.url;
+  void openUrl(hit.url);
+});
+
 els.hideTopbar.addEventListener("click", () => {
   setFontSheetOpen(false);
   setTopbarVisible(false);
+});
+
+els.pageMeta.addEventListener("click", () => {
+  if (!state.chapter) {
+    setTopbarVisible(true);
+    return;
+  }
+  if (state.topVisible) {
+    setFontSheetOpen(false);
+  }
+  setTopbarVisible(!state.topVisible);
 });
 
 els.toggleChapters.addEventListener("click", () => showDrawer(!els.drawer.classList.contains("open")));
@@ -183,6 +225,8 @@ document.addEventListener("visibilitychange", () => {
 
 // Initial state: prefer hash, then last URL; otherwise show an input hint.
 const initial = getHashUrl() || state.lastUrl || "";
+applyPanelVisibility();
+refreshSearchControls();
 els.urlInput.value = initial;
 if (initial) {
   void openUrl(initial);

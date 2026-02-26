@@ -18,7 +18,7 @@
   function syncTopbarHeight() {
     const topbar = document.querySelector(".topbar");
     if (!topbar) return;
-    const h = Math.max(56, Math.min(140, topbar.offsetHeight || 74));
+    const h = Math.max(56, topbar.offsetHeight || 74);
     document.documentElement.style.setProperty("--top", `${h}px`);
   }
   var els;
@@ -27,6 +27,13 @@
       els = {
         urlForm: requiredElement("urlForm"),
         urlInput: requiredElement("urlInput"),
+        toggleSearchPanel: requiredElement("toggleSearchPanel"),
+        toggleIntroPanel: requiredElement("toggleIntroPanel"),
+        searchForm: requiredElement("searchForm"),
+        searchInput: requiredElement("searchInput"),
+        searchSubmit: requiredElement("searchSubmit"),
+        searchStatus: requiredElement("searchStatus"),
+        searchList: requiredElement("searchList"),
         brandSub: requiredElement("brandSub"),
         hideTopbar: requiredElement("hideTopbar"),
         drawer: requiredElement("drawer"),
@@ -39,6 +46,7 @@
         chapterSearch: requiredElement("chapterSearch"),
         chapterList: requiredElement("chapterList"),
         drawerTitle: requiredElement("drawerTitle"),
+        searchCard: requiredElement("searchCard"),
         introCard: requiredElement("introCard"),
         bookTitle: requiredElement("bookTitle"),
         bookMeta: requiredElement("bookMeta"),
@@ -80,10 +88,12 @@
   });
 
   // web-src/constants.ts
-  var DEFAULT_FONT_PX, DEFAULT_FONT_WEIGHT, DEFAULT_BRIGHTNESS, MIN_FONT_WEIGHT, MAX_FONT_WEIGHT, FONT_WEIGHT_STEP, MIN_BRIGHTNESS, MAX_BRIGHTNESS, BRIGHTNESS_STEP, WEIGHT_PROBE_MIN_DELTA, READER_FONT_STACK_DEFAULT, READER_FONT_STACK_FALLBACK, READER_STATE_KEY, READER_STATE_VERSION, BRAND_SUB_IDLE, EMPTY_CHAPTER_TITLE, DEFAULT_HINT_TEXT, EMPTY_GUIDE_PARAGRAPHS;
+  var MIN_FONT_PX, MAX_FONT_PX, DEFAULT_FONT_PX, DEFAULT_FONT_WEIGHT, DEFAULT_BRIGHTNESS, MIN_FONT_WEIGHT, MAX_FONT_WEIGHT, FONT_WEIGHT_STEP, MIN_BRIGHTNESS, MAX_BRIGHTNESS, BRIGHTNESS_STEP, WEIGHT_PROBE_MIN_DELTA, SEARCH_COOLDOWN_MS, READER_FONT_STACK_DEFAULT, READER_FONT_STACK_FALLBACK, READER_STATE_KEY, READER_STATE_VERSION, BRAND_SUB_IDLE, EMPTY_CHAPTER_TITLE, DEFAULT_HINT_TEXT, EMPTY_GUIDE_PARAGRAPHS;
   var init_constants = __esm({
     "web-src/constants.ts"() {
-      DEFAULT_FONT_PX = 18;
+      MIN_FONT_PX = 14;
+      MAX_FONT_PX = 26;
+      DEFAULT_FONT_PX = MIN_FONT_PX;
       DEFAULT_FONT_WEIGHT = 500;
       DEFAULT_BRIGHTNESS = 1;
       MIN_FONT_WEIGHT = 300;
@@ -93,14 +103,16 @@
       MAX_BRIGHTNESS = 1.25;
       BRIGHTNESS_STEP = 0.05;
       WEIGHT_PROBE_MIN_DELTA = 0.25;
+      SEARCH_COOLDOWN_MS = 1e4;
       READER_FONT_STACK_DEFAULT = `"Microsoft YaHei Variable", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Noto Serif SC", "Source Han Serif SC", "STSong", "Songti SC", "Noto Serif", serif`;
       READER_FONT_STACK_FALLBACK = `"PingFang SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif`;
       READER_STATE_KEY = "danmei_reader_state_v1";
       READER_STATE_VERSION = 1;
-      BRAND_SUB_IDLE = "\u53EF\u4F20\u5165 dmxs.org URL\uFF08#u=...\uFF09\uFF0C\u6216\u5728\u4E0A\u65B9\u8F93\u5165\u4E66\u7C4D\u94FE\u63A5";
+      BRAND_SUB_IDLE = "\u53EF\u641C\u7D22\u4E66\u540D\u540E\u70B9\u9009\uFF0C\u4E5F\u53EF\u76F4\u63A5\u8F93\u5165 dmxs.org URL\uFF08#u=...\uFF09";
       EMPTY_CHAPTER_TITLE = "\u672A\u52A0\u8F7D\u5185\u5BB9";
       DEFAULT_HINT_TEXT = "\u70B9\u6B64\u8C03\u5B57\u4F53";
       EMPTY_GUIDE_PARAGRAPHS = [
+        "\u53EF\u5148\u7528\u5173\u952E\u8BCD\u641C\u7D22\u4E66\u540D\uFF0C\u518D\u70B9\u51FB\u7ED3\u679C\u76F4\u63A5\u6253\u5F00\u3002",
         "\u8BF7\u5728\u4E0A\u65B9\u8F93\u5165 dmxs.org \u4E66\u7C4D URL \u540E\u70B9\u51FB Open\u3002",
         "\u4E5F\u53EF\u4EE5\u901A\u8FC7\u5730\u5740\u680F #u=... \u4F20\u5165 URL\uFF0C\u9875\u9762\u4F1A\u81EA\u52A8\u6253\u5F00\u3002"
       ];
@@ -443,6 +455,13 @@
         fontWeight: DEFAULT_FONT_WEIGHT,
         brightness: DEFAULT_BRIGHTNESS,
         lastUrl: localStorage.getItem("danmei_lastUrl") || "",
+        searchPanelOpen: false,
+        introPanelOpen: false,
+        searchKeyword: "",
+        searchResults: [],
+        searchCooldownUntil: 0,
+        searchCooldownTimer: null,
+        searchInFlight: false,
         isLoading: false,
         loadingKind: "",
         topVisible: true,
@@ -486,7 +505,7 @@
   }
   function setFontPx(px) {
     const target = Number.isFinite(Number(px)) ? Number(px) : DEFAULT_FONT_PX;
-    const clamped = Math.max(14, Math.min(26, target));
+    const clamped = Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, target));
     state.fontPx = clamped;
     document.documentElement.style.setProperty("--page-font", `${clamped}px`);
     if (state.currentBookKey) {
@@ -518,7 +537,7 @@
     if (!state.currentBookKey) return;
     const savedFontPx = getStoredFontPx(state.currentBookKey);
     const nextFontPx = savedFontPx == null ? DEFAULT_FONT_PX : savedFontPx;
-    const fontPx = Math.max(14, Math.min(26, nextFontPx));
+    const fontPx = Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, nextFontPx));
     if (state.fontPx !== fontPx) {
       state.fontPx = fontPx;
       document.documentElement.style.setProperty("--page-font", `${fontPx}px`);
@@ -582,6 +601,9 @@
   function applyTopbarVisibility() {
     const hidden = !!state.chapter && !state.topVisible;
     document.body.classList.toggle("topbarHidden", hidden);
+    const pageMetaAction = state.chapter && state.topVisible ? "\u9690\u85CF\u9876\u90E8\u83DC\u5355" : "\u663E\u793A\u9876\u90E8\u83DC\u5355";
+    els.pageMeta.title = pageMetaAction;
+    els.pageMeta.setAttribute("aria-label", pageMetaAction);
     if (!hidden) syncTopbarHeight();
   }
   function setTopbarVisible(visible, opts = {}) {
@@ -590,6 +612,46 @@
     state.topVisible = next;
     applyTopbarVisibility();
     if (opts.skipRepaginate) return;
+    if (state.chapter) {
+      topbarRepaginateHandler?.();
+      if (topbarRepaginateTimer) {
+        clearTimeout(topbarRepaginateTimer);
+        topbarRepaginateTimer = null;
+      }
+      topbarRepaginateTimer = setTimeout(() => {
+        topbarRepaginateTimer = null;
+        if (!state.chapter) return;
+        if (state.topVisible !== next) return;
+        topbarRepaginateHandler?.();
+      }, 260);
+    }
+  }
+  function applyPanelVisibility() {
+    const showSearch = !!state.searchPanelOpen;
+    const hasBook = !!state.book;
+    const showIntro = hasBook && !!state.introPanelOpen;
+    els.searchCard.hidden = !showSearch;
+    els.introCard.hidden = !showIntro;
+    els.toggleSearchPanel.classList.toggle("isActive", showSearch);
+    els.toggleSearchPanel.textContent = showSearch ? "\u6536\u8D77\u641C\u7D22" : "\u641C\u7D22";
+    els.toggleIntroPanel.disabled = !hasBook;
+    els.toggleIntroPanel.classList.toggle("isActive", showIntro);
+    els.toggleIntroPanel.textContent = showIntro ? "\u6536\u8D77\u4ECB\u7ECD" : "\u4ECB\u7ECD";
+  }
+  function setSearchPanelOpen(open) {
+    const next = !!open;
+    if (state.searchPanelOpen === next) return;
+    state.searchPanelOpen = next;
+    applyPanelVisibility();
+    if (state.chapter) {
+      topbarRepaginateHandler?.();
+    }
+  }
+  function setIntroPanelOpen(open) {
+    const next = !!open;
+    if (state.introPanelOpen === next) return;
+    state.introPanelOpen = next;
+    applyPanelVisibility();
     if (state.chapter) {
       topbarRepaginateHandler?.();
     }
@@ -638,10 +700,39 @@
       }, autoResetMs);
     }
   }
+  function isSearchLoading() {
+    return !!state.searchInFlight || state.isLoading && state.loadingKind === "search";
+  }
+  function getSearchCooldownLeftSec(now = Date.now()) {
+    const until = Number(state.searchCooldownUntil) || 0;
+    if (!until) return 0;
+    return Math.max(0, Math.ceil((until - now) / 1e3));
+  }
+  function getSearchStatusText(defaultText) {
+    if (isSearchLoading()) return "\u6B63\u5728\u641C\u7D22\uFF0C\u8BF7\u7A0D\u5019...";
+    const cooldownLeft = getSearchCooldownLeftSec();
+    if (cooldownLeft > 0) return `\u641C\u7D22\u51B7\u5374\u4E2D\uFF0C\u8FD8\u9700 ${cooldownLeft} \u79D2`;
+    return defaultText;
+  }
+  function refreshSearchControls() {
+    const cooldownLeft = getSearchCooldownLeftSec();
+    els.searchInput.disabled = !!state.isLoading;
+    els.searchSubmit.disabled = !!state.isLoading || cooldownLeft > 0;
+    if (isSearchLoading()) {
+      els.searchSubmit.textContent = "\u641C\u7D22\u4E2D...";
+    } else if (cooldownLeft > 0) {
+      els.searchSubmit.textContent = `${cooldownLeft}\u79D2\u540E\u53EF\u641C`;
+    } else {
+      els.searchSubmit.textContent = "\u641C\u7D22";
+    }
+  }
   function setLoading(isLoading, label = "", kind = "") {
     state.isLoading = isLoading;
     state.loadingKind = isLoading ? String(kind || "") : "";
     els.urlInput.disabled = isLoading;
+    els.toggleSearchPanel.disabled = isLoading;
+    els.toggleIntroPanel.disabled = isLoading || !state.book;
+    refreshSearchControls();
     els.brandSub.textContent = isLoading ? label || "Loading..." : BRAND_SUB_IDLE;
     const showChapterOverlay = isLoading && state.loadingKind === "chapter";
     els.loadingOverlay.hidden = !showChapterOverlay;
@@ -649,13 +740,14 @@
       els.loadingLabel.textContent = label || "\u52A0\u8F7D\u4E2D...";
     }
   }
-  var topbarRepaginateHandler;
+  var topbarRepaginateHandler, topbarRepaginateTimer;
   var init_layout = __esm({
     "web-src/ui/layout.ts"() {
       init_constants();
       init_elements();
       init_store();
       topbarRepaginateHandler = null;
+      topbarRepaginateTimer = null;
     }
   });
 
@@ -665,6 +757,9 @@
     state.chapters = [];
     state.chapterIdx = -1;
     state.chapter = null;
+    state.introPanelOpen = false;
+    state.searchKeyword = "";
+    state.searchResults = [];
     state.currentBookKey = "";
     state.pendingRestore = null;
     state.repaginateToken += 1;
@@ -672,17 +767,42 @@
     state.pageIdx = 0;
     setTopbarVisible(true, { skipRepaginate: true });
     setFontSheetOpen(false);
-    els.introCard.hidden = true;
     setExportButtonsDisabled(true);
     els.drawerTitle.textContent = "\u7AE0\u8282";
     els.chapterSearch.value = "";
     renderChapters("");
     els.chapterTitle.textContent = EMPTY_CHAPTER_TITLE;
-    els.pageMeta.textContent = "";
+    els.chapterTitle.title = EMPTY_CHAPTER_TITLE;
+    els.pageMeta.textContent = "\u66F4\u591A\u8BBE\u7F6E";
+    els.pageMeta.title = "\u663E\u793A\u9876\u90E8\u83DC\u5355";
     els.pageText.innerHTML = EMPTY_GUIDE_PARAGRAPHS.map((t) => `<p>${escapeHtml(t)}</p>`).join("");
     showHint(DEFAULT_HINT_TEXT);
     els.progress.textContent = "";
     els.loadingOverlay.hidden = true;
+    applyPanelVisibility();
+    renderSearchResults();
+  }
+  function renderSearchResults() {
+    const keyword = String(state.searchKeyword || "").trim();
+    const items = Array.isArray(state.searchResults) ? state.searchResults : [];
+    let statusText = "";
+    if (!keyword) {
+      statusText = "\u8F93\u5165\u5173\u952E\u8BCD\u540E\u70B9\u51FB\u641C\u7D22\uFF0C\u9009\u62E9\u7ED3\u679C\u5373\u53EF\u6253\u5F00\u3002";
+    } else if (!items.length) {
+      statusText = `\u672A\u627E\u5230\u201C${keyword}\u201D\u76F8\u5173\u7ED3\u679C\u3002`;
+    } else {
+      statusText = `\u201C${keyword}\u201D\u627E\u5230 ${items.length} \u6761\u7ED3\u679C\uFF0C\u70B9\u51FB\u5373\u53EF\u6253\u5F00\u3002`;
+    }
+    els.searchStatus.textContent = getSearchStatusText(statusText);
+    els.searchList.innerHTML = items.map((item, idx) => {
+      const title = escapeHtml(String(item?.title || "\u672A\u547D\u540D\u4E66\u7C4D"));
+      const url = escapeHtml(String(item?.url || ""));
+      return `<button class="searchItem" type="button" data-idx="${idx}">
+        <div class="searchItemTitle">${title}</div>
+        <div class="searchItemUrl">${url}</div>
+      </button>`;
+    }).join("");
+    refreshSearchControls();
   }
   function renderChapters(filter = "") {
     const needle = (filter || "").trim().toLowerCase();
@@ -700,12 +820,17 @@
   }
   function renderBookCard(book) {
     if (!book) return;
-    els.introCard.hidden = false;
+    const bookTitle = String(book.title || "").trim();
+    els.chapterTitle.textContent = bookTitle || EMPTY_CHAPTER_TITLE;
+    els.chapterTitle.title = bookTitle || EMPTY_CHAPTER_TITLE;
+    els.pageMeta.textContent = "\u66F4\u591A\u8BBE\u7F6E";
+    els.pageMeta.title = "\u663E\u793A\u9876\u90E8\u83DC\u5355";
     els.bookTitle.textContent = book.title || "Untitled";
     els.drawerTitle.textContent = book.title ? `\u7AE0\u8282: ${book.title}` : "\u7AE0\u8282";
     els.bookMeta.textContent = [book.author ? `\u4F5C\u8005: ${book.author}` : "", book.dateText || ""].filter(Boolean).join("  \xB7  ");
     const introPs = htmlToParagraphs(book.introHtml || "");
     els.bookIntro.innerHTML = introPs.map((t) => `<p>${escapeHtml(t)}</p>`).join("");
+    applyPanelVisibility();
   }
   function renderPage() {
     const pages = state.pages || [];
@@ -714,9 +839,16 @@
     const lines = pages[idx] || [];
     els.pageText.innerHTML = lines.map((t) => `<p>${escapeHtml(t)}</p>`).join("");
     els.pageText.scrollTop = 0;
-    const chapterLabel = state.chapterIdx >= 0 ? `Chapter ${state.chapterIdx + 1}` : "";
+    const chapterCurrent = Number(state.chapter?.chapterIndex) > 0 ? Number(state.chapter?.chapterIndex) : state.chapterIdx >= 0 ? state.chapterIdx + 1 : null;
+    const chapterTotal = Number(state.chapter?.chapterTotal) > 0 ? Number(state.chapter?.chapterTotal) : Array.isArray(state.chapters) && state.chapters.length ? state.chapters.length : null;
     const totalPages = pages.length || 1;
-    els.progress.textContent = `${chapterLabel}  ${idx + 1}/${totalPages}`;
+    if (chapterCurrent && chapterTotal) {
+      els.progress.textContent = `\u7B2C${chapterCurrent}/${chapterTotal}\u7AE0 ${idx + 1}/${totalPages}\u9875`;
+    } else if (chapterCurrent) {
+      els.progress.textContent = `\u7B2C${chapterCurrent}\u7AE0 ${idx + 1}/${totalPages}\u9875`;
+    } else {
+      els.progress.textContent = `${idx + 1}/${totalPages}\u9875`;
+    }
     els.loadingOverlay.hidden = true;
     applyTopbarVisibility();
   }
@@ -847,6 +979,7 @@
       state.repaginateToken += 1;
       state.pages = [];
       state.pageIdx = 0;
+      setIntroPanelOpen(false);
       applyScopedFontForCurrentBook();
       setTopbarVisible(true, { skipRepaginate: true });
       setFontSheetOpen(false);
@@ -907,6 +1040,7 @@
             chapterBookUrl: chapter.bookUrl,
             inputUrl: url
           });
+          setIntroPanelOpen(false);
           applyScopedFontForCurrentBook();
           state.chapters = book.chapters || [];
           setExportButtonsDisabled(!state.chapters.length);
@@ -939,14 +1073,11 @@
           }
         }
       }
-      if (state.book) els.introCard.hidden = false;
-      els.chapterTitle.textContent = chapter.title || "Chapter";
-      const metaBits = [];
-      if (chapter.bookUrl && state.book?.title) metaBits.push(state.book.title);
-      if (chapter.chapterIndex && chapter.chapterTotal) {
-        metaBits.push(`${chapter.chapterIndex}/${chapter.chapterTotal}`);
-      }
-      els.pageMeta.textContent = metaBits.join("  \xB7  ");
+      const title = String(state.book?.title || "").trim() || chapter.title || "\u672A\u547D\u540D\u5C0F\u8BF4";
+      els.chapterTitle.textContent = title;
+      els.chapterTitle.title = title;
+      els.pageMeta.textContent = "\u66F4\u591A\u8BBE\u7F6E";
+      els.pageMeta.title = "\u663E\u793A\u9876\u90E8\u83DC\u5355";
       await waitForLayoutStable();
       state.pages = paginate(chapter.paragraphs || [], els.pageText, els.measure);
       state.pageIdx = 0;
@@ -1009,6 +1140,73 @@
     } finally {
       setLoading(false);
       setExportButtonsDisabled(!state.chapters.length);
+    }
+  }
+  function clearSearchCooldownTimer() {
+    if (!state.searchCooldownTimer) return;
+    clearInterval(state.searchCooldownTimer);
+    state.searchCooldownTimer = null;
+  }
+  function startSearchCooldown(durationMs) {
+    clearSearchCooldownTimer();
+    const duration = Math.max(0, Number(durationMs) || 0);
+    if (!duration) {
+      state.searchCooldownUntil = 0;
+      renderSearchResults();
+      return;
+    }
+    state.searchCooldownUntil = Date.now() + duration;
+    const tick = () => {
+      const left = getSearchCooldownLeftSec();
+      if (left <= 0) {
+        state.searchCooldownUntil = 0;
+        clearSearchCooldownTimer();
+        renderSearchResults();
+        return;
+      }
+      renderSearchResults();
+    };
+    tick();
+    state.searchCooldownTimer = setInterval(tick, 1e3);
+  }
+  async function searchBooks(keyword) {
+    const q = String(keyword || "").trim();
+    state.searchKeyword = q;
+    if (!q) {
+      state.searchResults = [];
+      renderSearchResults();
+      showHint("\u8BF7\u8F93\u5165\u641C\u7D22\u5173\u952E\u8BCD", { autoResetMs: 1600 });
+      return;
+    }
+    const cooldownLeft = getSearchCooldownLeftSec();
+    if (cooldownLeft > 0) {
+      renderSearchResults();
+      showHint(`\u641C\u7D22\u51B7\u5374\u4E2D\uFF0C\u8BF7 ${cooldownLeft} \u79D2\u540E\u518D\u8BD5`, { autoResetMs: 1600 });
+      return;
+    }
+    state.searchInFlight = true;
+    setLoading(true, "Searching books...", "search");
+    renderSearchResults();
+    try {
+      const payload = await apiGet("/api/search", { q });
+      state.searchKeyword = String(payload.keyword || q).trim();
+      state.searchResults = Array.isArray(payload.results) ? payload.results.map((item) => ({
+        title: String(item?.title || "").trim(),
+        url: String(item?.url || "").trim()
+      })).filter((item) => item.title && item.url) : [];
+      renderSearchResults();
+      if (!state.searchResults.length) {
+        showHint("\u672A\u627E\u5230\u76F8\u5173\u4E66\u7C4D", { autoResetMs: 1800 });
+      }
+    } catch (err) {
+      state.searchResults = [];
+      renderSearchResults();
+      const msg = err instanceof Error ? err.message : String(err || "\u672A\u77E5\u9519\u8BEF");
+      showHint(`\u641C\u7D22\u5931\u8D25\uFF1A${msg}`, { autoResetMs: 2600 });
+    } finally {
+      state.searchInFlight = false;
+      setLoading(false);
+      startSearchCooldown(SEARCH_COOLDOWN_MS);
     }
   }
   async function openUrl(url) {
@@ -1123,9 +1321,41 @@
         e.preventDefault();
         void openUrl(els.urlInput.value);
       });
+      els.toggleSearchPanel.addEventListener("click", () => {
+        setSearchPanelOpen(!state.searchPanelOpen);
+      });
+      els.toggleIntroPanel.addEventListener("click", () => {
+        if (!state.book) return;
+        setIntroPanelOpen(!state.introPanelOpen);
+      });
+      els.searchForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        void searchBooks(els.searchInput.value);
+      });
+      els.searchList.addEventListener("click", (e) => {
+        if (state.isLoading) return;
+        const target = e.target;
+        const item = target?.closest(".searchItem");
+        if (!item) return;
+        const idx = Number(item.getAttribute("data-idx"));
+        const hit = state.searchResults[idx];
+        if (!hit?.url) return;
+        els.urlInput.value = hit.url;
+        void openUrl(hit.url);
+      });
       els.hideTopbar.addEventListener("click", () => {
         setFontSheetOpen(false);
         setTopbarVisible(false);
+      });
+      els.pageMeta.addEventListener("click", () => {
+        if (!state.chapter) {
+          setTopbarVisible(true);
+          return;
+        }
+        if (state.topVisible) {
+          setFontSheetOpen(false);
+        }
+        setTopbarVisible(!state.topVisible);
       });
       els.toggleChapters.addEventListener("click", () => showDrawer(!els.drawer.classList.contains("open")));
       els.closeDrawer.addEventListener("click", () => showDrawer(false));
@@ -1224,6 +1454,8 @@
         }
       });
       var initial = getHashUrl() || state.lastUrl || "";
+      applyPanelVisibility();
+      refreshSearchControls();
       els.urlInput.value = initial;
       if (initial) {
         void openUrl(initial);

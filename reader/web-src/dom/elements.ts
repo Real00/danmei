@@ -9,6 +9,13 @@ function requiredElement<T extends HTMLElement>(id: string): T {
 export const els = {
   urlForm: requiredElement<HTMLFormElement>("urlForm"),
   urlInput: requiredElement<HTMLInputElement>("urlInput"),
+  toggleSearchPanel: requiredElement<HTMLButtonElement>("toggleSearchPanel"),
+  toggleIntroPanel: requiredElement<HTMLButtonElement>("toggleIntroPanel"),
+  searchForm: requiredElement<HTMLFormElement>("searchForm"),
+  searchInput: requiredElement<HTMLInputElement>("searchInput"),
+  searchSubmit: requiredElement<HTMLButtonElement>("searchSubmit"),
+  searchStatus: requiredElement<HTMLElement>("searchStatus"),
+  searchList: requiredElement<HTMLElement>("searchList"),
   brandSub: requiredElement<HTMLElement>("brandSub"),
   hideTopbar: requiredElement<HTMLButtonElement>("hideTopbar"),
 
@@ -23,6 +30,7 @@ export const els = {
   chapterList: requiredElement<HTMLElement>("chapterList"),
   drawerTitle: requiredElement<HTMLElement>("drawerTitle"),
 
+  searchCard: requiredElement<HTMLElement>("searchCard"),
   introCard: requiredElement<HTMLElement>("introCard"),
   bookTitle: requiredElement<HTMLElement>("bookTitle"),
   bookMeta: requiredElement<HTMLElement>("bookMeta"),
@@ -32,7 +40,7 @@ export const els = {
 
   pageCard: requiredElement<HTMLElement>("pageCard"),
   chapterTitle: requiredElement<HTMLElement>("chapterTitle"),
-  pageMeta: requiredElement<HTMLElement>("pageMeta"),
+  pageMeta: requiredElement<HTMLButtonElement>("pageMeta"),
   pageBody: requiredElement<HTMLElement>("pageBody"),
   pageFooter: requiredElement<HTMLElement>("pageFooter"),
   pageText: requiredElement<HTMLElement>("pageText"),
@@ -67,6 +75,7 @@ export const els = {
 export function syncTopbarHeight(): void {
   const topbar = document.querySelector(".topbar") as HTMLElement | null;
   if (!topbar) return;
-  const h = Math.max(56, Math.min(140, topbar.offsetHeight || 74));
+  // On mobile the topbar can wrap to multiple rows; keep full measured height.
+  const h = Math.max(56, topbar.offsetHeight || 74);
   document.documentElement.style.setProperty("--top", `${h}px`);
 }

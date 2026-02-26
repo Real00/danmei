@@ -3,6 +3,11 @@ export interface ChapterListItem {
   url: string;
 }
 
+export interface SearchResultItem {
+  title: string;
+  url: string;
+}
+
 export interface BookPayload {
   kind: "book";
   url: string;
@@ -30,6 +35,14 @@ export interface ChapterPayload {
   paragraphs: string[];
   fetcher?: string;
   cached?: boolean;
+}
+
+export interface SearchPayload {
+  kind: "search";
+  keyword: string;
+  url: string;
+  results: SearchResultItem[];
+  fetcher?: string;
 }
 
 export interface ReaderProgress {

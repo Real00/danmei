@@ -26,6 +26,12 @@
           placeholder="https://www.dmxs.org/book/xxxx.html"
         />
         <button class="btn btnPrimary" type="submit">Open</button>
+        <button class="btn btnGhost" type="button" id="toggleSearchPanel">
+          搜索
+        </button>
+        <button class="btn btnGhost" type="button" id="toggleIntroPanel" disabled>
+          介绍
+        </button>
         <button class="btn btnGhost" type="button" id="exportTxtTop" disabled>
           导出TXT
         </button>
@@ -66,6 +72,17 @@
       </aside>
 
       <section class="reader">
+        <div class="card searchCard" id="searchCard" hidden>
+          <form class="searchForm" id="searchForm" autocomplete="off">
+            <input class="searchInput" id="searchInput" placeholder="输入书名关键词，如：斗罗大陆" />
+            <button class="btn btnPrimary" type="submit" id="searchSubmit">
+              搜索
+            </button>
+          </form>
+          <div class="searchStatus" id="searchStatus">输入关键词后点击搜索，选择结果即可打开。</div>
+          <div class="searchList" id="searchList"></div>
+        </div>
+
         <div class="card introCard" id="introCard" hidden>
           <div class="introTop">
             <div class="introLeft">
@@ -90,8 +107,16 @@
 
         <div class="card pageCard" id="pageCard">
           <div class="pageHeader">
-            <div class="chapterTitle" id="chapterTitle">Ready</div>
-            <div class="pageMeta" id="pageMeta"></div>
+            <div class="chapterTitle" id="chapterTitle">未加载内容</div>
+            <button
+              class="pageMeta"
+              id="pageMeta"
+              type="button"
+              aria-label="显示顶部菜单"
+              title="显示顶部菜单"
+            >
+              更多设置
+            </button>
           </div>
 
           <div class="pageBody" id="pageBody">

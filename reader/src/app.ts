@@ -8,6 +8,8 @@ import { createPingRouter } from "./routes/ping";
 import { createDebugRouter } from "./routes/debug";
 import { createBookRouter } from "./routes/book";
 import { createChapterRouter } from "./routes/chapter";
+import { createSearchRouter } from "./routes/search";
+import { createSearchService } from "./services/searchService";
 
 export interface CreateAppOptions {
   debugEnabled?: boolean;
@@ -15,6 +17,7 @@ export interface CreateAppOptions {
   userAgent?: string;
   cache?: ReturnType<typeof createParsedCache>;
   fetchers?: Partial<FetcherBundle>;
+  searchService?: ReturnType<typeof createSearchService>;
 }
 
 export function createApp(options: CreateAppOptions = {}) {
@@ -33,6 +36,7 @@ export function createApp(options: CreateAppOptions = {}) {
     ...baseFetchers,
     ...options.fetchers,
   };
+  const searchService = options.searchService || createSearchService({ userAgent });
 
   const contentService = createContentService({
     fetchHtml: fetchers.fetchHtml,
@@ -50,6 +54,7 @@ export function createApp(options: CreateAppOptions = {}) {
   );
   app.use(createBookRouter({ contentService }));
   app.use(createChapterRouter({ contentService }));
+  app.use(createSearchRouter({ searchService }));
 
   app.use(express.static(path.join(__dirname, "..", "public"), { etag: true }));
   return app;

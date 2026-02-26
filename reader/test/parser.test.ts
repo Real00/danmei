@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { parseBook } from "../src/services/parser/bookParser";
 import { parseChapter } from "../src/services/parser/chapterParser";
+import { parseSearchResults } from "../src/services/parser/searchParser";
 
 const fixtureDir = path.join(process.cwd(), "test", "fixtures");
 
@@ -33,4 +34,19 @@ test("parseChapter extracts navigation and paragraphs", () => {
   assert.equal(parsed.chapterIndex, 1);
   assert.equal(parsed.chapterTotal, 20);
   assert.deepEqual(parsed.paragraphs, ["第一段正文。", "第二段正文。"]);
+});
+
+test("parseSearchResults keeps unique dmxs book links", () => {
+  const html = fs.readFileSync(path.join(fixtureDir, "search.html"), "utf8");
+  const parsed = parseSearchResults(html, "https://www.dmxs.org/e/search/result/index.html");
+
+  assert.equal(parsed.length, 2);
+  assert.deepEqual(parsed[0], {
+    title: "测试书名一",
+    url: "https://www.dmxs.org/book/21781.html",
+  });
+  assert.deepEqual(parsed[1], {
+    title: "测试书名二",
+    url: "https://www.dmxs.org/book/31500.html",
+  });
 });
