@@ -13,12 +13,35 @@ export function sanitizeFilename(name: string | null | undefined): string {
   return cleaned || "danmei";
 }
 
+interface ShareNavigatorLike {
+  canShare?: (data?: ShareData) => boolean;
+  share?: (data?: ShareData) => Promise<void>;
+  userAgent?: string;
+  platform?: string;
+  maxTouchPoints?: number;
+}
+
+export function shouldUseWebShareForTextDownload(nav: ShareNavigatorLike | null | undefined): boolean {
+  if (!nav) return false;
+  if (typeof nav.share !== "function" || typeof nav.canShare !== "function") return false;
+
+  const userAgent = String(nav.userAgent || "");
+  const platform = String(nav.platform || "");
+  const maxTouchPoints = Number(nav.maxTouchPoints || 0);
+  const isIosDevice =
+    /iPhone|iPad|iPod/i.test(userAgent) || (platform === "MacIntel" && maxTouchPoints > 1);
+  const isAndroidDevice = /Android/i.test(userAgent);
+  const isOtherMobileOrTablet = /Mobile|Tablet|Silk|Kindle|PlayBook|KF[A-Z0-9]+/i.test(userAgent);
+
+  return isIosDevice || isAndroidDevice || isOtherMobileOrTablet;
+}
+
 export async function downloadTextFile(filename: string, content: string): Promise<void> {
   const text = String(content || "");
   const blob = new Blob([`\uFEFF${text}`], { type: "text/plain;charset=utf-8" });
 
-  // iOS Safari does not support the `download` attribute; use Web Share API instead.
-  if (typeof navigator.canShare === "function") {
+  // iOS browsers do not reliably honor the `download` attribute; use Web Share there only.
+  if (shouldUseWebShareForTextDownload(globalThis.navigator)) {
     const file = new File([blob], filename, { type: "text/plain" });
     if (navigator.canShare({ files: [file] })) {
       await navigator.share({ files: [file], title: filename });

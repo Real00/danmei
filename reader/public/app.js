@@ -127,9 +127,27 @@
     const cleaned = String(name || "danmei").replace(/[\\/:*?"<>|\x00-\x1f]/g, " ").replace(/\s+/g, " ").trim();
     return cleaned || "danmei";
   }
-  function downloadTextFile(filename, content) {
+  function shouldUseWebShareForTextDownload(nav) {
+    if (!nav) return false;
+    if (typeof nav.share !== "function" || typeof nav.canShare !== "function") return false;
+    const userAgent = String(nav.userAgent || "");
+    const platform = String(nav.platform || "");
+    const maxTouchPoints = Number(nav.maxTouchPoints || 0);
+    const isIosDevice = /iPhone|iPad|iPod/i.test(userAgent) || platform === "MacIntel" && maxTouchPoints > 1;
+    const isAndroidDevice = /Android/i.test(userAgent);
+    const isOtherMobileOrTablet = /Mobile|Tablet|Silk|Kindle|PlayBook|KF[A-Z0-9]+/i.test(userAgent);
+    return isIosDevice || isAndroidDevice || isOtherMobileOrTablet;
+  }
+  async function downloadTextFile(filename, content) {
     const text = String(content || "");
     const blob = new Blob([`\uFEFF${text}`], { type: "text/plain;charset=utf-8" });
+    if (shouldUseWebShareForTextDownload(globalThis.navigator)) {
+      const file = new File([blob], filename, { type: "text/plain" });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+        return;
+      }
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -280,6 +298,61 @@
   }
   var init_api = __esm({
     "web-src/services/api.ts"() {
+    }
+  });
+
+  // web-src/services/chapterCache.ts
+  function openDb() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore(STORE_NAME);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return dbPromise;
+  }
+  async function getCachedChapter(url) {
+    try {
+      const db = await openDb();
+      return await new Promise((resolve) => {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const req = tx.objectStore(STORE_NAME).get(url);
+        req.onsuccess = () => {
+          const entry = req.result;
+          if (!entry) return resolve(null);
+          if (Date.now() - entry.cachedAt > TTL_MS) return resolve(null);
+          resolve(entry.paragraphs);
+        };
+        req.onerror = () => resolve(null);
+      });
+    } catch {
+      return null;
+    }
+  }
+  async function setCachedChapter(url, paragraphs) {
+    try {
+      const db = await openDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const entry = { paragraphs, cachedAt: Date.now() };
+        const req = tx.objectStore(STORE_NAME).put(entry, url);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    } catch {
+    }
+  }
+  var DB_NAME, STORE_NAME, DB_VERSION, TTL_MS, dbPromise;
+  var init_chapterCache = __esm({
+    "web-src/services/chapterCache.ts"() {
+      DB_NAME = "danmei_cache";
+      STORE_NAME = "chapters";
+      DB_VERSION = 1;
+      TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+      dbPromise = null;
     }
   });
 
@@ -1110,19 +1183,37 @@
     const fileName = `${sanitizeFilename(bookTitle)}.txt`;
     const blocks = [];
     const total = chapters.length;
+    const CONCURRENCY = 3;
+    let completed = 0;
+    async function fetchChapterParagraphs(url) {
+      const cached = await getCachedChapter(url);
+      if (cached) return cached;
+      const chapter = await apiGet("/api/chapter", { url });
+      const paragraphs = Array.isArray(chapter.paragraphs) ? chapter.paragraphs.map((p) => String(p || "").trim()).filter(Boolean) : [];
+      void setCachedChapter(url, paragraphs);
+      return paragraphs;
+    }
     setExportButtonsDisabled(true);
     setLoading(true, `\u5BFC\u51FATXT\u4E2D 0/${total}...`, "export");
     try {
+      const results = new Array(total);
+      let nextIdx = 0;
+      async function worker() {
+        while (nextIdx < total) {
+          const i = nextIdx++;
+          results[i] = await fetchChapterParagraphs(chapters[i].url);
+          completed += 1;
+          setLoading(true, `\u5BFC\u51FATXT\u4E2D ${completed}/${total}...`, "export");
+        }
+      }
+      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
       for (let i = 0; i < total; i += 1) {
-        const chapterMeta = chapters[i];
-        const chapter = await apiGet("/api/chapter", { url: chapterMeta.url });
-        const paragraphs = Array.isArray(chapter.paragraphs) ? chapter.paragraphs.map((p) => String(p || "").trim()).filter(Boolean) : [];
+        const paragraphs = results[i];
         const body = paragraphs.join("\r\n\r\n");
         const separator = `\u3010===== \u7AE0\u8282 ${i + 1}/${total} =====\u3011`;
         blocks.push(separator);
         if (body) blocks.push(body);
         else blocks.push("\uFF08\u672C\u7AE0\u65E0\u6B63\u6587\uFF09");
-        setLoading(true, `\u5BFC\u51FATXT\u4E2D ${i + 1}/${total}...`, "export");
       }
       const header = [
         `\u4E66\u540D\uFF1A${bookTitle}`,
@@ -1132,7 +1223,7 @@
         `\u5BFC\u51FA\u65F6\u95F4\uFF1A${(/* @__PURE__ */ new Date()).toLocaleString()}`
       ].filter(Boolean).join("\r\n");
       const content = [header, "", blocks.join("\r\n\r\n")].join("\r\n");
-      downloadTextFile(fileName, content);
+      await downloadTextFile(fileName, content);
       showHint(`\u5DF2\u5BFC\u51FA ${total} \u7AE0`, { autoResetMs: 2200 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err || "\u672A\u77E5\u9519\u8BEF");
@@ -1268,6 +1359,7 @@
       init_pagination();
       init_elements();
       init_api();
+      init_chapterCache();
       init_storage();
       init_preferences();
       init_store();

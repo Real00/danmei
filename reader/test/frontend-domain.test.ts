@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chunkLong } from "../web-src/domain/pagination";
 import { findChapterUrlByProgress, normalizeUrl } from "../web-src/services/storage";
+import { shouldUseWebShareForTextDownload } from "../web-src/utils/text";
 
 test("normalizeUrl strips hash and trailing slash", () => {
   assert.equal(
@@ -42,4 +43,54 @@ test("chunkLong splits oversized paragraph", () => {
   const chunks = chunkLong(long);
   assert.ok(chunks.length > 1);
   assert.ok(chunks.every((x) => x.length <= 360));
+});
+
+test("shouldUseWebShareForTextDownload keeps mobile and tablet share flow only", () => {
+  assert.equal(
+    shouldUseWebShareForTextDownload({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+      platform: "Win32",
+      maxTouchPoints: 0,
+      canShare: () => true,
+      share: async () => {},
+    }),
+    false
+  );
+
+  assert.equal(
+    shouldUseWebShareForTextDownload({
+      userAgent:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1",
+      platform: "iPhone",
+      maxTouchPoints: 5,
+      canShare: () => true,
+      share: async () => {},
+    }),
+    true
+  );
+
+  assert.equal(
+    shouldUseWebShareForTextDownload({
+      userAgent:
+        "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36",
+      platform: "Linux armv8l",
+      maxTouchPoints: 5,
+      canShare: () => true,
+      share: async () => {},
+    }),
+    true
+  );
+
+  assert.equal(
+    shouldUseWebShareForTextDownload({
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+      platform: "MacIntel",
+      maxTouchPoints: 0,
+      canShare: () => true,
+      share: async () => {},
+    }),
+    false
+  );
 });
