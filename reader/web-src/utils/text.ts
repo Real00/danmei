@@ -13,9 +13,19 @@ export function sanitizeFilename(name: string | null | undefined): string {
   return cleaned || "danmei";
 }
 
-export function downloadTextFile(filename: string, content: string): void {
+export async function downloadTextFile(filename: string, content: string): Promise<void> {
   const text = String(content || "");
   const blob = new Blob([`\uFEFF${text}`], { type: "text/plain;charset=utf-8" });
+
+  // iOS Safari does not support the `download` attribute; use Web Share API instead.
+  if (typeof navigator.canShare === "function") {
+    const file = new File([blob], filename, { type: "text/plain" });
+    if (navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: filename });
+      return;
+    }
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

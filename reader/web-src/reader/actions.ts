@@ -2,6 +2,7 @@ import { BRIGHTNESS_STEP, FONT_WEIGHT_STEP, SEARCH_COOLDOWN_MS } from "../consta
 import { paginate } from "../domain/pagination";
 import { els } from "../dom/elements";
 import { apiGet } from "../services/api";
+import { getCachedChapter, setCachedChapter } from "../services/chapterCache";
 import {
   findChapterUrlByProgress,
   getStoredProgress,
@@ -216,23 +217,44 @@ export async function exportBookToTxt(): Promise<void> {
   const blocks: string[] = [];
   const total = chapters.length;
 
+  const CONCURRENCY = 3;
+  let completed = 0;
+
+  async function fetchChapterParagraphs(url: string): Promise<string[]> {
+    const cached = await getCachedChapter(url);
+    if (cached) return cached;
+    const chapter = await apiGet<Record<string, any>>("/api/chapter", { url });
+    const paragraphs = Array.isArray(chapter.paragraphs)
+      ? chapter.paragraphs.map((p: unknown) => String(p || "").trim()).filter(Boolean)
+      : [];
+    void setCachedChapter(url, paragraphs);
+    return paragraphs;
+  }
+
   setExportButtonsDisabled(true);
   setLoading(true, `导出TXT中 0/${total}...`, "export");
   try {
+    const results: string[][] = new Array(total);
+
+    // Process chapters in sliding window of CONCURRENCY parallel requests.
+    let nextIdx = 0;
+    async function worker(): Promise<void> {
+      while (nextIdx < total) {
+        const i = nextIdx++;
+        results[i] = await fetchChapterParagraphs(chapters[i].url);
+        completed += 1;
+        setLoading(true, `导出TXT中 ${completed}/${total}...`, "export");
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
     for (let i = 0; i < total; i += 1) {
-      const chapterMeta = chapters[i];
-      const chapter = await apiGet<Record<string, any>>("/api/chapter", { url: chapterMeta.url });
-      const paragraphs = Array.isArray(chapter.paragraphs)
-        ? chapter.paragraphs.map((p) => String(p || "").trim()).filter(Boolean)
-        : [];
+      const paragraphs = results[i];
       const body = paragraphs.join("\r\n\r\n");
       const separator = `\u3010===== 章节 ${i + 1}/${total} =====\u3011`;
-
       blocks.push(separator);
       if (body) blocks.push(body);
       else blocks.push("（本章无正文）");
-
-      setLoading(true, `导出TXT中 ${i + 1}/${total}...`, "export");
     }
 
     const header = [
@@ -245,7 +267,7 @@ export async function exportBookToTxt(): Promise<void> {
       .filter(Boolean)
       .join("\r\n");
     const content = [header, "", blocks.join("\r\n\r\n")].join("\r\n");
-    downloadTextFile(fileName, content);
+    await downloadTextFile(fileName, content);
     showHint(`已导出 ${total} 章`, { autoResetMs: 2200 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err || "未知错误");
